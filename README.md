@@ -1,194 +1,327 @@
-README.md
-# AI Agentic Development
+<div align="center">
 
-Practical laboratory for learning and experimenting with AI-driven software development using Claude Code.
+# 🤖 AI Agentic Development
 
-This repository explores how to use **Context Engineering, Skills, Agents, TDD and Code Review** to build better AI-assisted development workflows.
+### *I'm not building an app — I'm building my AI development laboratory.*
 
-## 🎯 Goal
+A practical playground for learning how AI coding agents actually work,<br/>
+and how to give them the right **context**, **instructions**, **tools** and **workflows**.
 
-The goal of this repository is not to build a production application.
+<br/>
 
-It is a practical environment to understand how AI coding agents work and how to give them the right context, instructions, tools and workflows.
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Claude Code](https://img.shields.io/badge/Claude_Code-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-6_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-4C8BF5?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-work_in_progress-F0B429?style=for-the-badge)
 
-The project evolves as new concepts are learned and tested.
+</div>
 
 ---
 
-## 🧠 Concepts
+## 🎯 Goal
 
-This repository explores:
+> **This repository is not trying to ship a production application.**
+>
+> It is a controlled environment to answer one question:
+> *what actually makes an AI coding agent good at engineering work?*
 
-- Context Engineering
-- Claude Code
-- Agentic Development
-- Skills
-- Agents
-- Commands
-- Test-Driven Development (TDD)
-- Automated Code Review
-- AI-assisted software development
-- Software engineering workflows
+Most people use AI coding tools as a fancy autocomplete. This repo goes the other
+way — treating the agent as a **system you engineer**: give it context, give it
+process, give it tools, then measure whether the output gets better.
+
+Everything here is small on purpose. The interesting part is never the code —
+it's the **scaffolding around the code**.
+
+```
+❌ "AI, write my app"          →  unpredictable output, no process
+✅ Context + Skills + Agents   →  repeatable engineering workflow
+```
+
+---
+
+## 🧠 Concepts explored
+
+| | Concept | What it means here |
+|:--:|---|---|
+| 🗂️ | **Context Engineering** | Designing what the agent knows before it acts — `CLAUDE.md`, project rules, architecture docs |
+| 🧩 | **Skills** | Reusable, versioned instructions that teach the agent *how* to do a kind of work |
+| 🤝 | **Agents** | Specialized workers with their own scope, tools and model |
+| ⌨️ | **Commands** | Repeatable shortcuts for recurring workflows |
+| 🔴🟢 | **Test-Driven Development** | The agent writes the failing test *first* — no "trust me, it works" |
+| 🔍 | **Automated Code Review** | A systematic review pass with severity levels, not vibes |
+| 🔀 | **Multi-step workflows** | Chaining the above into something that behaves like a real engineering process |
 
 ---
 
 ## 📁 Structure
 
-```text
+```
 .
 ├── .claude/
-│   ├── agents/
-│   ├── commands/
+│   ├── agents/                        # specialized agents        (coming soon)
+│   ├── commands/                      # reusable commands         (coming soon)
 │   └── skills/
 │       ├── test-driven-development/
-│       │   └── SKILL.md
+│       │   └── SKILL.md               # 🔴🟢 the TDD process
 │       └── code-review/
-│           └── SKILL.md
+│           └── SKILL.md               # 🔍 the review process
 │
 ├── src/
-│   ├── __init__.py
-│   └── parity.py
+│   └── ai_dev_lab/
+│       ├── __init__.py
+│       └── parity.py                  # current example
 │
 ├── tests/
 │   ├── __init__.py
 │   └── test_parity.py
 │
+├── docs/
+├── CLAUDE.md                          # 🗂️ the agent's project context
 └── README.md
-🛠️ Current Example
+```
 
-The first exercise is intentionally simple.
+> 💡 **Why `src/ai_dev_lab/` and not just `src/`?**
+> A package literally named `src` is not distributable and collides with every
+> other `src` on the path. This was caught by the repo's own Code Review skill —
+> see [Code Review in action](#-code-review-in-action).
 
-A Python function determines whether a number is even:
+---
 
+## 🧩 Skills
+
+A **Skill** is a markdown file that teaches the agent a repeatable process.
+It is version-controlled, reviewable and improvable — like any other engineering asset.
+
+<table>
+<tr>
+<th width="50%">🔴🟢 Test-Driven Development</th>
+<th width="50%">🔍 Code Review</th>
+</tr>
+<tr>
+<td valign="top">
+
+`.claude/skills/test-driven-development/SKILL.md`
+
+Triggers whenever code is written or changed.
+
+**Rules it enforces**
+- Never mark a task done without running tests
+- Prefer updating existing tests over adding new ones
+- Understand the implementation *before* changing it
+- No unnecessary tests
+
+</td>
+<td valign="top">
+
+`.claude/skills/code-review/SKILL.md`
+
+Triggers on a diff, PR or change set.
+
+**Rules it enforces**
+- Report only issues with concrete evidence
+- No personal style preferences
+- No inflated severities
+- Justify every security claim technically
+
+</td>
+</tr>
+</table>
+
+### 🔴🟢 The TDD workflow
+
+```mermaid
+flowchart TD
+    A["📋 Understand requirement"] --> B["🔎 Look for existing tests"]
+    B --> C["✍️ Write / update the test"]
+    C --> D{"▶️ Run tests"}
+    D -->|"🔴 RED"| E["Fails for the right reason"]
+    E --> F["⚙️ Implement"]
+    F --> G{"▶️ Run tests"}
+    G -->|"🔴 still red"| H["🐞 Investigate & fix"]
+    H --> G
+    G -->|"🟢 GREEN"| I["♻️ Check regressions"]
+    I --> J["🏁 Done"]
+
+    style E fill:#ffdce0,stroke:#d1242f,color:#1f2328
+    style I fill:#dafbe1,stroke:#1a7f37,color:#1f2328
+    style J fill:#dafbe1,stroke:#1a7f37,color:#1f2328
+```
+
+The critical step is **RED**. A test that passes immediately proves nothing —
+it has to fail for the *right reason* first, otherwise you never learn whether
+it can detect the bug at all.
+
+### 🔍 The Code Review workflow
+
+```mermaid
+flowchart LR
+    D["📥 Diff"] --> CTX["🗂️ Context"]
+    CTX --> ARCH["🏛️ Architecture"]
+    ARCH --> BUG["🐞 Bugs"]
+    BUG --> EDGE["🧩 Edge cases"]
+    EDGE --> SEC["🔐 Security"]
+    SEC --> TST["🧪 Missing tests"]
+    TST --> REG["♻️ Regressions"]
+    REG --> OUT["📤 Findings by severity"]
+
+    style D fill:#ddf4ff,stroke:#0969da,color:#1f2328
+    style OUT fill:#fff8c5,stroke:#9a6700,color:#1f2328
+```
+
+Findings are reported with an explicit severity — and the skill forbids inflating them:
+
+| Severity | Meaning |
+|---|---|
+| 🟣 `CRITICAL` | Security risk, data loss or severe failure |
+| 🔴 `HIGH` | Real bug or vulnerability that can reach production |
+| 🟠 `MEDIUM` | Relevant problem, limited blast radius |
+| 🟡 `LOW` | Minor issue, worth considering |
+| ⚪ `INFO` | Observation, no significant impact |
+
+---
+
+## 🛠️ Current example
+
+The first exercise is **intentionally trivial** — the point is the process, not the problem.
+
+A function that determines whether a number is even:
+
+```python
 def is_even(number):
+    # bool inherits from int: without this guard, True would pass validation
+    # and be reported as odd.
+    if isinstance(number, bool) or not isinstance(number, int):
+        raise TypeError(f"is_even espera int, recebeu {type(number).__name__}")
     return number % 2 == 0
+```
 
-The implementation was created following a Test-Driven Development workflow.
+<details>
+<summary><b>📊 Behaviour contract</b> — click to expand</summary>
 
-TDD workflow
-Requirement
-     ↓
-Find existing tests
-     ↓
-Write test
-     ↓
-🔴 RED
-Test fails
-     ↓
-Implement
-     ↓
-🟢 GREEN
-Test passes
-     ↓
-Check regressions
-🧩 Skills
+<br/>
 
-Skills provide reusable instructions that teach the AI agent how to perform a specific type of work.
+| Input | Result | Why |
+|---|---|---|
+| `4` | `True` | even |
+| `7` | `False` | odd |
+| `0` | `True` | even |
+| `-2` | `True` | Python's `%` returns the divisor's sign, so negatives are safe |
+| `-3` | `False` | odd |
+| `2.5` | `TypeError` | parity is undefined — returning `False` would claim "2.5 is odd" |
+| `4.0` | `TypeError` | contract is `int` only, explicitly |
+| `True` | `TypeError` | `bool` is a subclass of `int`; silently answering would be a trap |
+| `"4"` | `TypeError` | without the guard, `%` is string formatting and the error is misleading |
+| `None` | `TypeError` | no parity |
 
-Test-Driven Development
+</details>
 
-Located at:
+### 🔍 Code Review in action
 
-.claude/skills/test-driven-development/SKILL.md
+The first version of this function was two lines and had **no validation**.
+The repo's own Code Review skill was then pointed at it, and produced four findings:
 
-The skill instructs Claude to:
+| Severity | Finding | Outcome |
+|---|---|---|
+| 🟠 `MEDIUM` | Package was literally named `src` — not distributable, breaks once installed | ✅ renamed to `ai_dev_lab` |
+| 🟡 `LOW` | `CLAUDE.md` declared Pytest, the suite used `unittest` | ✅ documentation corrected |
+| 🟡 `LOW` | `2.5` returned `False`, `True` returned `False` — undefined and untested | ✅ contract enforced + tested |
+| ⚪ `INFO` | `is_even("4")` raised a misleading string-formatting error | ✅ fixed by the guard |
 
-Understand the requirement
-Look for existing tests
-Create or update tests
-Run the tests
-Implement the functionality
-Run the tests again
-Fix failures
-Check for regressions
-Code Review
+**This is the whole thesis of the repo in one table:** the agent reviewed its own
+output against a written process and found real problems — not because it was
+asked to be critical, but because it had a checklist and evidence rules.
 
-Located at:
+---
 
-.claude/skills/code-review/SKILL.md
-
-The skill instructs Claude to review changes systematically:
-
-Diff
- ↓
-Architecture
- ↓
-Bugs
- ↓
-Edge Cases
- ↓
-Security
- ↓
-Missing Tests
- ↓
-Regressions
- ↓
-Code Review
-
-The objective is to identify real problems rather than simply suggest personal preferences.
-
-🧪 Running Tests
-
-The current test suite uses Python's built-in unittest.
+## 🧪 Running the tests
 
 From the project root:
 
-python3 -m unittest discover -s tests -t .
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -t .
+```
 
-Expected result:
+Expected output:
 
-Ran 4 tests ... OK
-🔬 Experiments
+```
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.000s
 
-The repository will be used to experiment with increasingly advanced AI development workflows.
+OK
+```
 
-Planned experiments include:
+> ℹ️ `PYTHONPATH=src` is what makes the src-layout resolve without installing the
+> package. Once `pyproject.toml` declares the project and it's installed with
+> `pip install -e .`, the prefix is no longer needed.
 
- Create the first TDD Skill
- Create the first Code Review Skill
- Create reusable Claude commands
- Create specialized Agents
- Combine Agents and Skills
- Improve project context
- Experiment with Context Engineering
- Build multi-step development workflows
- Explore automated code review
- Explore multi-agent workflows
-📚 Learning Path
+---
 
-The current learning path is:
+## 🔬 Experiments
 
-Prompt Engineering
-        ↓
-Context Engineering
-        ↓
-Skills
-        ↓
-Tools
-        ↓
-Agents
-        ↓
-Multi-Agent Systems
-        ↓
-AI-driven Development
+- [x] Create the first **TDD Skill**
+- [x] Create the first **Code Review Skill**
+- [x] Have the agent review and fix its own code
+- [ ] Create reusable **Claude commands**
+- [ ] Create specialized **Agents**
+- [ ] Combine Agents and Skills
+- [ ] Improve project context (`CLAUDE.md` as a real spec)
+- [ ] Experiment with Context Engineering strategies
+- [ ] Build multi-step development workflows
+- [ ] Explore **MCP** servers and external tools
+- [ ] Explore multi-agent workflows
 
-Each concept will be implemented and tested in this repository rather than studied only theoretically.
+---
 
-🚧 Status
+## 📚 Learning path
 
-This repository is a work in progress.
+```mermaid
+flowchart TD
+    P["💬 Prompt Engineering"] --> C["🗂️ Context Engineering"]
+    C --> S["🧩 Skills"]
+    S --> T["🛠️ Tools & MCP"]
+    T --> A["🤝 Agents"]
+    A --> M["🕸️ Multi-Agent Systems"]
+    M --> D["🚀 AI-driven Development"]
 
-The code and structure will evolve as new AI-assisted development concepts are explored.
+    style P fill:#dafbe1,stroke:#1a7f37,color:#1f2328
+    style C fill:#dafbe1,stroke:#1a7f37,color:#1f2328
+    style S fill:#dafbe1,stroke:#1a7f37,color:#1f2328
+    style T fill:#fff8c5,stroke:#9a6700,color:#1f2328
+    style A fill:#f6f8fa,stroke:#8c959f,color:#1f2328
+    style M fill:#f6f8fa,stroke:#8c959f,color:#1f2328
+    style D fill:#f6f8fa,stroke:#8c959f,color:#1f2328
+```
 
-License
+<div align="center">
+
+🟢 done &nbsp;·&nbsp; 🟡 in progress &nbsp;·&nbsp; ⚪ next
+
+</div>
+
+Each concept gets **implemented and tested here**, not just read about.
+
+---
+
+## 🚧 Status
+
+**Work in progress — and permanently so.**
+
+This repository is a lab notebook. The code will stay small; the scaffolding
+around it is what grows. Structure, skills and workflows will be rewritten as
+better patterns are found — that's the point, not a disclaimer.
+
+---
+
+<div align="center">
+
+## 📄 License
 
 MIT
 
+<br/>
 
-### Eu faria ainda uma pequena mudança
+**Built with [Claude Code](https://claude.com/claude-code)** 🤖
 
-Como esse é um **projeto de estudo que vai evoluir**, eu manteria o README exatamente nessa ideia:
-
-> **"Não estou construindo um app; estou construindo meu laboratório de desenvolvimento com IA."**
-
-Isso deixa muito mais interessante para quem entrar no seu GitHub daqui a alguns meses e encontrar `Skills`, `Agents`, `MCP`, testes, workflows etc.
+</div>
