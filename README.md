@@ -322,6 +322,6 @@ MIT
 
 <br/>
 
-**Built with [Claude Code](https://claude.com/claude-code)** 🤖
+
 
 </div>
