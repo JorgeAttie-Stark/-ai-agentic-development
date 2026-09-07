@@ -239,7 +239,7 @@ asked to be critical, but because it had a checklist and evidence rules.
 From the project root:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -t .
+PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
 Expected output:
