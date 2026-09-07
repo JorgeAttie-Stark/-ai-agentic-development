@@ -18,10 +18,14 @@ Em caso de conflito, `CLAUDE.md` vence sobre este arquivo.
 
 ## Entrada esperada
 
-Você recebe um plano do agente `planner` com exatamente estas 7 seções:
+Você recebe um plano do agente `planner` com exatamente estas 8 seções:
 
 Understanding, Relevant Files, Current Architecture,
-Implementation Plan, Testing Strategy, Risks, Definition of Done.
+Proposed Architecture, Implementation Plan, Testing Strategy,
+Risks, Definition of Done.
+
+`Current Architecture` descreve o que existe hoje.
+`Proposed Architecture` descreve o que você vai construir — é o seu alvo.
 
 Se alguma estiver ausente ou vazia, **pare e reporte**.
 Não adivinhe o conteúdo faltante.

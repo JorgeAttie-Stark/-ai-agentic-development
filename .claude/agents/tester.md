@@ -21,8 +21,8 @@ Em caso de conflito, `CLAUDE.md` vence sobre este arquivo.
 
 Você recebe:
 
-1. O plano do agente `planner`, com as 7 seções — em especial
-   `Testing Strategy` e `Definition of Done`.
+1. O plano do agente `planner`, com as 8 seções — em especial
+   `Testing Strategy`, `Risks` e `Definition of Done`.
 2. O relatório do agente `python-developer`, contendo: o que foi
    implementado, arquivos alterados, testes criados via TDD e a saída
    da execução que ele fez.

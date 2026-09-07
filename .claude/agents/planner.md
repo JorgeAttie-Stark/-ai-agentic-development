@@ -44,7 +44,7 @@ pequeno e executável.
 ## Saída
 
 Sua saída é a entrada do agente `python-developer`, que exige
-exatamente estas 7 seções, nesta ordem, com estes títulos.
+exatamente estas 8 seções, nesta ordem, com estes títulos.
 
 Nunca omita uma seção. Se não houver conteúdo, escreva `Nenhum`
 em vez de apagar o título.
@@ -56,7 +56,13 @@ O que precisa ser feito.
 Arquivos relevantes.
 
 ### Current Architecture
-Como a parte afetada funciona hoje.
+Como a parte afetada funciona **hoje**, observado no repositório.
+Apenas estado atual — nenhum desenho novo entra aqui.
+
+### Proposed Architecture
+O que vai ser **construído**: módulos, responsabilidades, contratos
+entre eles e o que fica explicitamente fora de escopo.
+Se a tarefa não muda a arquitetura, escreva `Nenhum`.
 
 ### Implementation Plan
 Passos concretos para implementação.

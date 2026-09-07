@@ -4,7 +4,7 @@ description: Pipeline completo planner → python-developer → tester → revie
 
 Execute o pipeline para a tarefa: $ARGUMENTS
 
-1. Invoque o subagent `planner`. Saída = plano de 7 seções.
+1. Invoque o subagent `planner`. Saída = plano de 8 seções.
 2. Invoque `python-developer` passando o plano **literal** como entrada.
 3. Invoque `tester`.
    - Veredito `REPROVADO` → volte ao passo 2 com o relatório do tester.

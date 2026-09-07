@@ -20,8 +20,9 @@ Em caso de conflito, `CLAUDE.md` vence sobre este arquivo.
 
 Você recebe:
 
-1. O plano do agente `planner`, com as 7 seções — use `Definition of Done`
-   como critério de aprovação.
+1. O plano do agente `planner`, com as 8 seções — use `Definition of Done`
+   como critério de aprovação e `Proposed Architecture` como referência
+   do que deveria ter sido construído.
 2. O relatório do agente `python-developer`: o que foi implementado e
    quais arquivos mudaram.
 3. O relatório do agente `tester`: veredito, evidência de execução e
