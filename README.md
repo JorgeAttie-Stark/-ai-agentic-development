@@ -70,11 +70,22 @@ it's the **scaffolding around the code**.
 ├── src/
 │   └── ai_dev_lab/
 │       ├── __init__.py
-│       └── parity.py                  # current example
+│       ├── parity.py                  # current example
+│       └── project_intelligence/      # MCP server over stdio (Milestone 0)
+│           ├── __init__.py
+│           ├── __main__.py
+│           ├── config.py
+│           └── protocol.py
 │
 ├── tests/
 │   ├── __init__.py
-│   └── test_parity.py
+│   ├── test_parity.py
+│   └── project_intelligence/
+│       ├── __init__.py
+│       ├── test_config.py
+│       ├── test_main.py
+│       ├── test_protocol.py
+│       └── fixtures/fake_project/     # synthetic multi-language target
 │
 ├── docs/
 ├── CLAUDE.md                          # 🗂️ the agent's project context
@@ -239,7 +250,7 @@ asked to be critical, but because it had a checklist and evidence rules.
 From the project root:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -t .
+PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
 Expected output:
@@ -255,6 +266,53 @@ OK
 > ℹ️ `PYTHONPATH=src` is what makes the src-layout resolve without installing the
 > package. Once `pyproject.toml` declares the project and it's installed with
 > `pip install -e .`, the prefix is no longer needed.
+
+---
+
+## 🔌 Project Intelligence MCP
+
+An MCP server over stdio (JSON-RPC 2.0, one request per line) that points at an
+arbitrary `projectRoot` — not necessarily this repository. Milestone 0 proves
+the end-to-end wiring: `initialize`, `tools/list` and `tools/call` for a single
+tool, `project_info` (file/line counts and known manifests at the target root).
+
+Run it directly, pointed at a target project:
+
+```bash
+PYTHONPATH=src python3 -m ai_dev_lab.project_intelligence --root /path/to/target/project
+```
+
+Configure it in `claude_desktop_config.json`. **`--root` is required here** —
+see the note below:
+
+```json
+{
+  "mcpServers": {
+    "project-intel": {
+      "command": "python3",
+      "args": [
+        "-m", "ai_dev_lab.project_intelligence",
+        "--root", "/path/to/target/project"
+      ],
+      "env": { "PYTHONPATH": "/path/to/repo/src" }
+    }
+  }
+}
+```
+
+> ⚠️ **Do not use a `cwd` key here.** Claude Desktop does not support `cwd` in
+> `mcpServers` — it silently strips the key when it rewrites the config file.
+> Without `--root`, the server falls back to the app's own working directory and
+> reports a useless inventory (`total_files: 20000`, `scan_truncated: true`) with
+> no error explaining why.
+>
+> Falling back to `cwd` still works when you run the server by hand in a
+> terminal, where the working directory is the shell's and therefore predictable.
+
+Restart Claude Desktop with `Cmd+Q` after editing — closing the window is not
+enough. The tools then appear under the `+` button in the message composer.
+
+Full architecture, scope and roadmap: `docs/plan-project-intelligence-mcp.md`.
 
 ---
 
