@@ -21,11 +21,16 @@ from pathlib import Path
 from .errors import ToolError
 from .exploration import (
     GITIGNORE_SCOPE_LIMITATIONS,
-    MAX_FILE_SIZE_FOR_LINE_COUNT,
     _load_gitignore_patterns,
-    _matches_any_gitignore_pattern,
     _prune_gitignore_dirs,
     _walk_pruned,
+)
+from .scanning import (
+    MAX_FINDINGS,
+    iter_project_files,
+    read_text,
+    relative_posix,
+    validated,
 )
 from .findings import (
     findings_output_schema,
@@ -38,7 +43,6 @@ MAX_TREE_DEPTH = 8
 # Teto de largura, não só de profundidade: um monorepo produz dezenas de
 # milhares de diretórios, e a árvore inteira vai numa única linha de stdio.
 MAX_TREE_NODES = 2_000
-MAX_FINDINGS = 300
 
 # Vocabulário arquitetural comum. Casar um nome aqui é evidência de *convenção*,
 # nunca de estrutura real de dependência — por isso o método é `name-pattern`
@@ -76,68 +80,6 @@ STRUCTURE_HEURISTICS = (
 HEURISTIC_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".php", ".cs"}
 
 
-def _validated(findings):
-    """Revalida todo finding antes de ele ir para a wire.
-
-    `make_finding` já valida na construção, mas isto fecha o caminho de quem
-    montar o dict à mão em qualquer tool futura — e é barato: o custo é O(n)
-    sobre uma lista já limitada por teto.
-    """
-    for finding in findings:
-        validate_finding(finding)
-    return findings
-
-
-def _relative_posix(path, project_root):
-    return Path(path).relative_to(project_root).as_posix()
-
-
-def _iter_project_files(project_root, counters):
-    """Arquivos regulares da raiz, com `.git` e `.gitignore` de topo aplicados.
-
-    Reusa integralmente o mecanismo de poda da Camada Exploração — nenhuma
-    lógica de `.gitignore` é reimplementada aqui.
-    """
-    patterns = _load_gitignore_patterns(project_root) or []
-
-    for dirpath, dirnames, filenames in _walk_pruned(project_root, counters):
-        if patterns:
-            _prune_gitignore_dirs(dirnames, dirpath, project_root, patterns)
-
-        # Ordem determinística. Sem isto a travessia segue a ordem do
-        # filesystem, e quando um teto de findings corta, *quais* arquivos
-        # entram varia por máquina e por execução — o consumidor recebe um
-        # subconjunto arbitrário e irreprodutível.
-        dirnames.sort()
-        for filename in sorted(filenames):
-            relative_file = _relative_posix(Path(dirpath, filename), project_root)
-            if patterns and _matches_any_gitignore_pattern(patterns, filename, relative_file):
-                continue
-
-            file_path = os.path.join(dirpath, filename)
-            # `isfile` antes de qualquer `open()` — FIFO sem writer não bloqueia.
-            if not os.path.isfile(file_path):
-                counters["unreadable_entries_skipped"] += 1
-                continue
-
-            yield file_path, relative_file
-
-
-def _read_text(file_path):
-    """Texto do arquivo, ou `None` se binário ou grande demais para analisar."""
-    try:
-        if os.path.getsize(file_path) > MAX_FILE_SIZE_FOR_LINE_COUNT:
-            return None
-        with open(file_path, "rb") as handle:
-            raw = handle.read()
-    except OSError:
-        return None
-
-    if b"\x00" in raw[:8192]:
-        return None
-    return raw.decode("utf-8", errors="ignore")
-
-
 def _handle_project_map(project_root, arguments):
     """Árvore de diretórios com contagem de arquivos. Factual, sem findings.
 
@@ -165,7 +107,7 @@ def _handle_project_map(project_root, arguments):
                 dirnames[:] = []
                 continue
 
-            relative_dir = _relative_posix(dirpath, project_root)
+            relative_dir = relative_posix(dirpath, project_root)
             depth = 0 if relative_dir == "." else len(Path(relative_dir).parts)
             if relative_dir == ".":
                 relative_dir = ""
@@ -261,7 +203,7 @@ def _handle_architecture_explainer(project_root, arguments):
                 if not role:
                     continue
                 matched.append(
-                    (role, _relative_posix(Path(dirpath, dirname), project_root))
+                    (role, relative_posix(Path(dirpath, dirname), project_root))
                 )
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
@@ -281,7 +223,7 @@ def _handle_architecture_explainer(project_root, arguments):
         scope_limitations.extend(GITIGNORE_SCOPE_LIMITATIONS)
 
     return {
-        "findings": _validated(findings[:MAX_FINDINGS]),
+        "findings": validated(findings[:MAX_FINDINGS]),
         # Conta diretórios casados, não palavras do vocabulário: agregar por
         # palavra descartava evidência disponível e fazia o contador afirmar
         # cobertura que o payload não tinha.
@@ -375,7 +317,7 @@ def _handle_code_structure_analyzer(project_root, arguments):
     findings_truncated = False
 
     try:
-        for file_path, relative_file in _iter_project_files(project_root, counters):
+        for file_path, relative_file in iter_project_files(project_root, counters):
             # Corte em fronteira de ARQUIVO, nunca no meio. Devolver 3 de 14
             # findings de um arquivo com confiança HIGH faria o consumidor
             # concluir que o arquivo define 3 coisas — cada finding verdadeiro,
@@ -389,7 +331,7 @@ def _handle_code_structure_analyzer(project_root, arguments):
             if extension != ".py" and extension not in HEURISTIC_EXTENSIONS:
                 continue
 
-            text = _read_text(file_path)
+            text = read_text(file_path)
             if text is None:
                 counters["unreadable_entries_skipped"] += 1
                 continue
@@ -413,7 +355,7 @@ def _handle_code_structure_analyzer(project_root, arguments):
         raise ToolError("não foi possível varrer o diretório do projeto") from error
 
     return {
-        "findings": _validated(findings),
+        "findings": validated(findings),
         "files_analyzed": files_analyzed,
         "files_unparseable": files_unparseable,
         "files_skipped_by_cap": files_skipped_by_cap,
@@ -557,7 +499,7 @@ def _handle_dependency_analyzer(project_root, arguments):
             continue
 
         manifests_found.append(name)
-        text = _read_text(manifest_path)
+        text = read_text(manifest_path)
         if text is None:
             manifests_unparseable.append(name)
             continue
@@ -574,7 +516,8 @@ def _handle_dependency_analyzer(project_root, arguments):
             manifests_unparseable.append(name)
 
     return {
-        "findings": _validated(findings[:MAX_FINDINGS]),
+        "findings": validated(findings[:MAX_FINDINGS]),
+        "findings_truncated": len(findings) > MAX_FINDINGS,
         "manifests_found": manifests_found,
         "manifests_unparseable": manifests_unparseable,
         "lines_unrecognized": lines_unrecognized,
@@ -584,6 +527,7 @@ def _handle_dependency_analyzer(project_root, arguments):
 
 DEPENDENCY_OUTPUT_SCHEMA = findings_output_schema(
     {
+        "findings_truncated": {"type": "boolean"},
         "manifests_found": {"type": "array", "items": {"type": "string"}},
         "manifests_unparseable": {"type": "array", "items": {"type": "string"}},
         "lines_unrecognized": {"type": "integer"},

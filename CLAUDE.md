@@ -34,7 +34,7 @@ O pacote importável é `ai_dev_lab`, dentro de `src/`.
 
 Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
 para um `projectRoot` resolvido de `--root`, com o `cwd` do processo como
-fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools:
+fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para dezoito tools:
 
 **Camada Exploração** — retrieval pura, sem envelope:
 
@@ -57,6 +57,26 @@ fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools
 | `data_flow_analyzer` | `ast-parse` — grafo de **chamadas**, não fluxo de dados | `HIGH` |
 | `business_rules_analyzer` | `regex-heuristic` — localiza candidatos, **não descreve a regra** | `LOW` |
 
+**Camada Análise** — nomes que prometem juízo, com o limite fixado:
+
+| Tool | Limite |
+|---|---|
+| `security_analyzer` | detecta **padrão**, nunca vulnerabilidade confirmada. Nada chega a `HIGH` |
+| `improvement_analyzer` | **métrica com o valor medido** e limiares no retorno, nunca juízo |
+| `test_analyzer` | **estático** — nunca executa a suíte do projeto-alvo |
+
+**Camadas Visualização e Documentação** — serialização, zero análise nova:
+
+| Tool | |
+|---|---|
+| `generate_mermaid` | aresta sólida = `HIGH`, tracejada = `MEDIUM`/`LOW` |
+| `generate_project_report` | confiança e método ao lado de cada conclusão |
+| `generate_architecture_documentation` | declara ausência em vez de supor |
+| `generate_project_summary` | mesmas fontes, menos texto |
+
+Toda tool destas duas camadas declara `derived_from` — um documento sem
+procedência é uma afirmação sem fonte.
+
 ### O envelope de evidência
 
 `findings.py` impõe por código, não por convenção:
@@ -72,9 +92,8 @@ Onde não há evidência, a tool reporta **ausência**, não palpite. Lista de
 findings vazia com limitação declarada é resposta melhor que inferência fraca
 apresentada como descoberta.
 
-As três são retrieval pura — devolvem fato observado, sem envelope de
-`findings`/`confidence`. Esse envelope começa no Milestone 2, com as tools de
-inferência.
+As cinco primeiras são retrieval pura — devolvem fato observado, sem envelope
+de `findings`/`confidence`.
 
 Rodar o servidor apontado para um projeto alvo:
 

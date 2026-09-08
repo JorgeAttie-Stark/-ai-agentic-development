@@ -11,7 +11,7 @@ and how to give them the right **context**, **instructions**, **tools** and **wo
 
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude_Code-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-186_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-236_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-4C8BF5?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-work_in_progress-F0B429?style=for-the-badge)
 
@@ -201,9 +201,10 @@ An MCP server that helps Claude understand **any** software project: read it, ma
 it, explain it, analyse it, document it. Language-agnostic on purpose — it points
 at an arbitrary repository, not at this one.
 
-Milestones 0 through 3 shipped: JSON-RPC 2.0 over stdio, `initialize` /
-`tools/list` / `tools/call`, and **eleven tools** — the complete
-Exploration, Understanding and Inference layers. Python 3.9, stdlib only.
+All five milestones shipped: JSON-RPC 2.0 over stdio, `initialize` /
+`tools/list` / `tools/call`, and **all eighteen tools** — the
+complete roadmap: Exploration, Understanding, Inference, Analysis,
+Visualization and Documentation. Python 3.9, stdlib only.
 
 The design constraint that shapes everything: **no conclusion without evidence.**
 Any inferred claim carries the file, the line, the snippet, and a confidence level
@@ -257,7 +258,7 @@ Expected output:
 
 ```
 ----------------------------------------------------------------------
-Ran 186 tests in 0.401s
+Ran 236 tests in 0.396s
 
 OK
 ```
