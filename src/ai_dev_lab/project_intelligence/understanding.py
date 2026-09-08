@@ -313,19 +313,14 @@ def _handle_code_structure_analyzer(project_root, arguments):
     findings = []
     files_analyzed = 0
     files_unparseable = 0
-    files_skipped_by_cap = 0
+    # Lista, não contagem: alinhado ao `inference.py`. O consumidor precisa
+    # saber QUAIS arquivos ficaram fora, senão não percebe que uma pasta
+    # inteira foi omitida.
+    files_skipped_by_cap = []
     findings_truncated = False
 
     try:
         for file_path, relative_file in iter_project_files(project_root, counters):
-            # Corte em fronteira de ARQUIVO, nunca no meio. Devolver 3 de 14
-            # findings de um arquivo com confiança HIGH faria o consumidor
-            # concluir que o arquivo define 3 coisas — cada finding verdadeiro,
-            # a completude implícita falsa.
-            if len(findings) >= MAX_FINDINGS:
-                findings_truncated = True
-                files_skipped_by_cap += 1
-                continue
 
             extension = Path(relative_file).suffix
             if extension != ".py" and extension not in HEURISTIC_EXTENSIONS:
@@ -336,9 +331,10 @@ def _handle_code_structure_analyzer(project_root, arguments):
                 counters["unreadable_entries_skipped"] += 1
                 continue
 
+            produced = []
             if extension == ".py":
                 try:
-                    findings.extend(_python_structure_findings(text, relative_file))
+                    produced = _python_structure_findings(text, relative_file)
                 except (SyntaxError, ValueError, RecursionError, MemoryError):
                     # `ast.parse` levanta mais que SyntaxError: ValueError para
                     # NUL byte além da janela de sniff, RecursionError/MemoryError
@@ -348,8 +344,18 @@ def _handle_code_structure_analyzer(project_root, arguments):
                     files_unparseable += 1
                     continue
             else:
-                findings.extend(_heuristic_structure_findings(text, relative_file))
+                produced = _heuristic_structure_findings(text, relative_file)
 
+            # Teto é teto: pula o arquivo inteiro e o nomeia, em vez de deixar
+            # estourar. Corte no meio devolveria 3 de 14 findings de um arquivo
+            # com confiança HIGH — cada finding verdadeiro, a completude
+            # implícita falsa.
+            if len(findings) + len(produced) > MAX_FINDINGS:
+                findings_truncated = True
+                files_skipped_by_cap.append(relative_file)
+                continue
+
+            findings.extend(produced)
             files_analyzed += 1
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
@@ -369,7 +375,7 @@ CODE_STRUCTURE_OUTPUT_SCHEMA = findings_output_schema(
     {
         "files_analyzed": {"type": "integer"},
         "files_unparseable": {"type": "integer"},
-        "files_skipped_by_cap": {"type": "integer"},
+        "files_skipped_by_cap": {"type": "array", "items": {"type": "string"}},
         "findings_truncated": {"type": "boolean"},
         "unreadable_entries_skipped": {"type": "integer"},
     }
