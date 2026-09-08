@@ -33,10 +33,8 @@ import re
 from pathlib import Path
 
 from .errors import ToolError
-from .findings import findings_output_schema, make_evidence, make_finding, validate_finding
-from .understanding import _iter_project_files, _read_text
-
-MAX_FINDINGS = 300
+from .findings import findings_output_schema, make_evidence, make_finding
+from .scanning import MAX_FINDINGS, iter_project_files, read_text, validated
 
 CALL_GRAPH_LIMITATIONS = (
     "esta tool NÃO é análise de fluxo de dados — fluxo real exige CFG e "
@@ -173,11 +171,11 @@ def _handle_data_flow_analyzer(project_root, arguments):
     findings_truncated = False
 
     try:
-        for file_path, relative_file in _iter_project_files(project_root, counters):
+        for file_path, relative_file in iter_project_files(project_root, counters):
             if Path(relative_file).suffix != ".py":
                 continue
 
-            text = _read_text(file_path)
+            text = read_text(file_path)
             if text is None:
                 counters["unreadable_entries_skipped"] += 1
                 continue
@@ -202,11 +200,8 @@ def _handle_data_flow_analyzer(project_root, arguments):
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
 
-    for finding in findings:
-        validate_finding(finding)
-
     return {
-        "findings": findings,
+        "findings": validated(findings),
         "python_files_analyzed": python_files_analyzed,
         "files_unparseable": files_unparseable,
         "files_skipped_by_cap": files_skipped_by_cap,
@@ -279,8 +274,8 @@ def _handle_business_rules_analyzer(project_root, arguments):
     findings_truncated = False
 
     try:
-        for file_path, relative_file in _iter_project_files(project_root, counters):
-            text = _read_text(file_path)
+        for file_path, relative_file in iter_project_files(project_root, counters):
+            text = read_text(file_path)
             if text is None:
                 counters["unreadable_entries_skipped"] += 1
                 continue
@@ -307,11 +302,8 @@ def _handle_business_rules_analyzer(project_root, arguments):
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
 
-    for finding in findings:
-        validate_finding(finding)
-
     return {
-        "findings": findings,
+        "findings": validated(findings),
         "files_scanned": files_scanned,
         "files_skipped_by_cap": files_skipped_by_cap,
         "findings_truncated": findings_truncated,
