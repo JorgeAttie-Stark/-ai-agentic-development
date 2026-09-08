@@ -99,3 +99,58 @@ class ValidateFindingTests(unittest.TestCase):
 
         with self.assertRaises(ToolError):
             validate_finding(forged)
+
+
+class EvidenceInvariantRegressionTests(unittest.TestCase):
+    """IMPORTANTE 9: as invariantes eram mais fracas que o docstring afirmava.
+
+    Todos estes casos eram ACEITOS antes. O reviewer mostrou que `make_evidence`
+    não era chokepoint — um dict cru com path absoluto atravessava
+    `make_finding` sem checagem — e que `validate_finding` não olhava item de
+    evidência nenhum.
+    """
+
+    def test_string_as_evidence_is_rejected(self):
+        """`list("abc")` viraria três itens de evidência de um caractere."""
+        with self.assertRaises(ToolError):
+            make_finding("c", "ast-parse", "abc")
+
+    def test_raw_dict_without_file_is_rejected(self):
+        with self.assertRaises(ToolError):
+            make_finding("c", "ast-parse", [{}])
+
+    def test_raw_dict_with_absolute_path_is_rejected(self):
+        with self.assertRaises(ToolError):
+            make_finding(
+                "c",
+                "ast-parse",
+                [{"file": "/Users/alguem/.ssh/id_rsa", "line": 1, "snippet": "k"}],
+            )
+
+    def test_path_with_parent_traversal_is_rejected(self):
+        with self.assertRaises(ToolError):
+            make_finding(
+                "c", "ast-parse", [{"file": "../../etc/passwd", "line": 1, "snippet": "x"}]
+            )
+
+    def test_validate_finding_checks_evidence_items_too(self):
+        forged = {
+            "claim": "c",
+            "confidence": "HIGH",
+            "method": "ast-parse",
+            "evidence": [{"file": "/etc/passwd", "line": 1, "snippet": "x"}],
+        }
+
+        with self.assertRaises(ToolError):
+            validate_finding(forged)
+
+    def test_validate_finding_rejects_empty_claim(self):
+        forged = {
+            "claim": "",
+            "confidence": "HIGH",
+            "method": "ast-parse",
+            "evidence": [make_evidence("a.py")],
+        }
+
+        with self.assertRaises(ToolError):
+            validate_finding(forged)

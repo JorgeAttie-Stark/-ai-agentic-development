@@ -6,15 +6,26 @@ evidência, não uma inferência sobre ela. A partir da Camada Entendimento as
 tools passam a *afirmar* coisas, e é aqui que essa afirmação fica amarrada ao
 que a sustenta.
 
-Duas invariantes, ambas impostas por código e não por convenção:
+Quatro invariantes, todas impostas por código e não por convenção:
 
-1. **Nenhuma claim sem evidência.** `make_finding` recusa lista vazia.
+1. **Nenhuma claim sem evidência.** `make_finding` recusa lista vazia — e
+   recusa string, que é iterável e viraria um "item" por caractere.
 2. **`confidence` é derivada do `method`, nunca escolhida.** Não existe
    parâmetro de confiança — quem quiser `HIGH` precisa usar um método que
    parseia formato bem definido. Isso é o que impede a tool de "achar" que
    está mais certa do que o método permite.
+3. **Todo item de evidência é validado**, venha de `make_evidence` ou de dict
+   cru. Path absoluto, `..` e item sem `file` são recusados em
+   `_validate_evidence_item`, que os dois caminhos atravessam. Sem isso,
+   `make_evidence` não era chokepoint e a garantia voltava a ser convenção.
+4. **`validate_finding` é chamada em produção**, no ponto de saída de cada
+   tool interpretativa — não é utilitário de teste. É o que fecha o caminho de
+   quem montar o dict à mão numa tool futura.
 """
 from __future__ import annotations
+
+import os
+from pathlib import Path
 
 from .errors import ToolError
 
@@ -35,6 +46,29 @@ CONFIDENCE_BY_METHOD = {
 }
 
 
+def _validate_evidence_item(item):
+    """Valida um item de evidência, venha ele de `make_evidence` ou de dict cru.
+
+    Existe separado porque `make_evidence` não era chokepoint: um dict literal
+    com path absoluto passava por `make_finding` sem checagem, e a garantia de
+    "recusa path absoluto no construtor" voltava a ser convenção.
+    """
+    if not isinstance(item, dict):
+        raise ToolError("cada item de evidência deve ser um dict")
+
+    missing = {"file", "line", "snippet"} - set(item)
+    if missing:
+        raise ToolError(f"item de evidência incompleto, faltam: {sorted(missing)}")
+
+    file = item["file"]
+    if not isinstance(file, str) or not file:
+        raise ToolError("evidência exige um caminho de arquivo não vazio")
+    if os.path.isabs(file) or file.startswith("/") or ":" in file[:3]:
+        raise ToolError("evidência exige caminho relativo, não absoluto")
+    if ".." in Path(file).parts:
+        raise ToolError("evidência não pode conter `..`")
+
+
 def make_evidence(file, line=None, snippet=None):
     """Um item de evidência: onde olhar para conferir a claim.
 
@@ -42,15 +76,12 @@ def make_evidence(file, line=None, snippet=None):
     no construtor, e não em cada tool — vazamento de estrutura de máquina é
     fácil de introduzir por descuido e caro de auditar depois.
     """
-    if not isinstance(file, str) or not file:
-        raise ToolError("evidência exige um caminho de arquivo não vazio")
-    if file.startswith("/"):
-        raise ToolError("evidência exige caminho relativo, não absoluto")
-
     if snippet is not None:
         snippet = snippet[:MAX_SNIPPET_LENGTH]
 
-    return {"file": file, "line": line, "snippet": snippet}
+    item = {"file": file, "line": line, "snippet": snippet}
+    _validate_evidence_item(item)
+    return item
 
 
 def make_finding(claim, method, evidence):
@@ -63,14 +94,20 @@ def make_finding(claim, method, evidence):
         raise ToolError("finding exige uma claim não vazia")
     if method not in CONFIDENCE_BY_METHOD:
         raise ToolError(f"método desconhecido: {method}")
-    if not evidence:
+    if not evidence or isinstance(evidence, (str, bytes)):
+        # Uma string é iterável: `list("abc")` viraria três "itens" de
+        # evidência de um caractere cada, e passava pela checagem de não-vazio.
         raise ToolError("finding exige ao menos um item de evidência")
+
+    evidence = list(evidence)
+    for item in evidence:
+        _validate_evidence_item(item)
 
     return {
         "claim": claim,
         "confidence": CONFIDENCE_BY_METHOD[method],
         "method": method,
-        "evidence": list(evidence),
+        "evidence": evidence,
     }
 
 
@@ -93,8 +130,12 @@ def validate_finding(finding):
             f"confiança inconsistente com o método: {method} exige "
             f"{CONFIDENCE_BY_METHOD[method]}"
         )
+    if not isinstance(finding["claim"], str) or not finding["claim"]:
+        raise ToolError("finding exige uma claim não vazia")
     if not finding["evidence"]:
         raise ToolError("finding exige ao menos um item de evidência")
+    for item in finding["evidence"]:
+        _validate_evidence_item(item)
 
 
 FINDING_SCHEMA = {

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -215,3 +216,131 @@ class DependencyAnalyzerTests(unittest.TestCase):
 
             self.assertIn("only-this", claims)
             self.assertNotIn("lodash", claims)
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Regressões dos achados do reviewer no fechamento do Milestone 2.
+
+    Nenhum destes casos falhava na suíte anterior — todos passavam. É a classe
+    de erro que teste não pega sozinho: afirmar mais do que a evidência
+    sustenta.
+    """
+
+    def test_requirements_url_and_vcs_lines_are_not_dependencies(self):
+        """BLOQUEANTE 1: a regex emitia `https` e `git` como pacote, com HIGH."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "requirements.txt").write_text(
+                "git+https://github.com/psf/requests.git#egg=requests\n"
+                "https://example.com/x.whl\n"
+                "./local/pkg\n"
+                "-e .\n"
+                "flask==2.0\n"
+                "httpx[cli]>=0.24\n"
+            )
+
+            result = understanding._handle_dependency_analyzer(root, {})
+            names = {f["claim"].split("`")[1] for f in result["findings"]}
+
+            self.assertEqual(names, {"flask", "httpx"})
+            self.assertEqual(result["lines_unrecognized"], 4)
+
+    def test_architecture_explainer_prunes_gitignored_trees(self):
+        """BLOQUEANTE 2: concluía a arquitetura do projeto a partir de node_modules."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".gitignore").write_text("node_modules/\n")
+            (root / "node_modules" / "express" / "lib" / "middlewares").mkdir(parents=True)
+            (root / "src" / "services").mkdir(parents=True)
+
+            result = understanding._handle_architecture_explainer(root, {})
+            paths = [f["evidence"][0]["file"] for f in result["findings"]]
+
+            self.assertEqual(paths, ["src/services"])
+            self.assertTrue(result["gitignore_applied"])
+            self.assertEqual(result["directories_matched"], 1)
+
+    def test_architecture_explainer_counts_directories_not_vocabulary_words(self):
+        """IMPORTANTE 5: agregava por palavra e descartava evidência disponível."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for parent in ("a", "b", "c"):
+                (root / parent / "models").mkdir(parents=True)
+
+            result = understanding._handle_architecture_explainer(root, {})
+
+            self.assertEqual(result["directories_matched"], 3)
+            self.assertEqual(len(result["findings"]), 3)
+
+    def test_code_structure_truncation_is_flagged_and_cuts_at_file_boundary(self):
+        """BLOQUEANTE 3: truncava em silêncio, e no meio do arquivo."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(3):
+                (root / f"m{index}.py").write_text(
+                    "".join(f"def f{n}():\n    pass\n" for n in range(5))
+                )
+
+            with patch.object(understanding, "MAX_FINDINGS", 6):
+                result = understanding._handle_code_structure_analyzer(root, {})
+
+            self.assertTrue(result["findings_truncated"])
+            self.assertGreater(result["files_skipped_by_cap"], 0)
+
+            # Nenhum arquivo aparece parcialmente: quem entra, entra inteiro.
+            per_file = {}
+            for finding in result["findings"]:
+                name = finding["evidence"][0]["file"]
+                per_file[name] = per_file.get(name, 0) + 1
+            self.assertTrue(all(count == 5 for count in per_file.values()))
+
+    def test_python_with_null_byte_beyond_sniff_is_counted_not_fatal(self):
+        """BLOQUEANTE 4a: ValueError do ast.parse derrubava a tool inteira."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ok.py").write_text("def alive():\n    pass\n")
+            (root / "nul.py").write_bytes(b"#" + b"a" * 9000 + b"\x00rest")
+
+            result = understanding._handle_code_structure_analyzer(root, {})
+
+            self.assertEqual(result["files_unparseable"], 1)
+            self.assertTrue(any("alive" in f["claim"] for f in result["findings"]))
+
+    def test_package_json_that_is_not_an_object_is_unparseable_not_fatal(self):
+        """BLOQUEANTE 4b: AttributeError do .get num array derrubava a tool."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text("[1, 2, 3]\n")
+
+            result = understanding._handle_dependency_analyzer(root, {})
+
+            self.assertEqual(result["manifests_unparseable"], ["package.json"])
+            self.assertEqual(result["findings"], [])
+
+    def test_project_map_prunes_gitignored_trees_like_list_files(self):
+        """IMPORTANTE 8: duas tools davam "fatos observados" incompatíveis."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".gitignore").write_text("node_modules/\n")
+            (root / "node_modules" / "x").mkdir(parents=True)
+            (root / "src").mkdir()
+
+            result = understanding._handle_project_map(root, {})
+            paths = {node["path"] for node in result["tree"]["children"]}
+
+            self.assertNotIn("node_modules", paths)
+            self.assertTrue(result["gitignore_applied"])
+
+    def test_counters_of_degradation_reach_the_response(self):
+        """IMPORTANTE 6: eram calculados e descartados."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "ok.py").write_text("def f():\n    pass\n")
+            os.mkfifo(root / "pipe.py")
+
+            structure = understanding._handle_code_structure_analyzer(root, {})
+            architecture = understanding._handle_architecture_explainer(root, {})
+
+            self.assertIn("unreadable_entries_skipped", structure)
+            self.assertIn("unreadable_entries_skipped", architecture)
+            self.assertGreaterEqual(structure["unreadable_entries_skipped"], 1)

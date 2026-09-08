@@ -20,15 +20,24 @@ from pathlib import Path
 
 from .errors import ToolError
 from .exploration import (
+    GITIGNORE_SCOPE_LIMITATIONS,
     MAX_FILE_SIZE_FOR_LINE_COUNT,
     _load_gitignore_patterns,
     _matches_any_gitignore_pattern,
     _prune_gitignore_dirs,
     _walk_pruned,
 )
-from .findings import findings_output_schema, make_evidence, make_finding
+from .findings import (
+    findings_output_schema,
+    make_evidence,
+    make_finding,
+    validate_finding,
+)
 
 MAX_TREE_DEPTH = 8
+# Teto de largura, não só de profundidade: um monorepo produz dezenas de
+# milhares de diretórios, e a árvore inteira vai numa única linha de stdio.
+MAX_TREE_NODES = 2_000
 MAX_FINDINGS = 300
 
 # Vocabulário arquitetural comum. Casar um nome aqui é evidência de *convenção*,
@@ -65,6 +74,18 @@ STRUCTURE_HEURISTICS = (
 )
 
 HEURISTIC_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".php", ".cs"}
+
+
+def _validated(findings):
+    """Revalida todo finding antes de ele ir para a wire.
+
+    `make_finding` já valida na construção, mas isto fecha o caminho de quem
+    montar o dict à mão em qualquer tool futura — e é barato: o custo é O(n)
+    sobre uma lista já limitada por teto.
+    """
+    for finding in findings:
+        validate_finding(finding)
+    return findings
 
 
 def _relative_posix(path, project_root):
@@ -119,11 +140,26 @@ def _handle_project_map(project_root, arguments):
     tipo que `list_files` devolve. Não há claim a sustentar.
     """
     counters = {"unreadable_entries_skipped": 0}
+    patterns = _load_gitignore_patterns(project_root)
+    gitignore_applied = patterns is not None
+    if patterns is None:
+        patterns = []
     nodes = {}
     tree_truncated = False
 
     try:
         for dirpath, dirnames, filenames in _walk_pruned(project_root, counters):
+            # Sem a poda, `project_map` e `list_files` devolviam "fatos
+            # observados" incompatíveis sobre o mesmo projeto: um via
+            # `node_modules/` inteiro, o outro não.
+            if patterns:
+                _prune_gitignore_dirs(dirnames, dirpath, project_root, patterns)
+
+            if len(nodes) >= MAX_TREE_NODES:
+                tree_truncated = True
+                dirnames[:] = []
+                continue
+
             relative_dir = _relative_posix(dirpath, project_root)
             depth = 0 if relative_dir == "." else len(Path(relative_dir).parts)
             if relative_dir == ".":
@@ -153,7 +189,11 @@ def _handle_project_map(project_root, arguments):
         "tree": nodes.get("", {"path": "", "file_count": 0, "children": []}),
         "total_directories": len(nodes),
         "tree_truncated": tree_truncated,
+        "gitignore_applied": gitignore_applied,
         "unreadable_entries_skipped": counters["unreadable_entries_skipped"],
+        "scope_limitations": (
+            list(GITIGNORE_SCOPE_LIMITATIONS) if gitignore_applied else []
+        ),
     }
 
 
@@ -163,9 +203,18 @@ PROJECT_MAP_OUTPUT_SCHEMA = {
         "tree": {"type": "object"},
         "total_directories": {"type": "integer"},
         "tree_truncated": {"type": "boolean"},
+        "gitignore_applied": {"type": "boolean"},
         "unreadable_entries_skipped": {"type": "integer"},
+        "scope_limitations": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["tree", "total_directories", "tree_truncated", "unreadable_entries_skipped"],
+    "required": [
+        "tree",
+        "total_directories",
+        "tree_truncated",
+        "gitignore_applied",
+        "unreadable_entries_skipped",
+        "scope_limitations",
+    ],
     "additionalProperties": False,
 }
 
@@ -188,24 +237,32 @@ def _handle_architecture_explainer(project_root, arguments):
     `name-pattern` — não há caminho de código que produza HIGH aqui.
     """
     counters = {"unreadable_entries_skipped": 0}
-    seen = {}
+    patterns = _load_gitignore_patterns(project_root)
+    gitignore_applied = patterns is not None
+    if patterns is None:
+        patterns = []
+    matched = []
 
     try:
         for dirpath, dirnames, filenames in _walk_pruned(project_root, counters):
+            # Sem esta poda, a tool concluía a arquitetura do projeto a partir
+            # de `node_modules/` e `vendor/` — código de terceiros que o próprio
+            # repositório declarou ignorar.
+            if patterns:
+                _prune_gitignore_dirs(dirnames, dirpath, project_root, patterns)
+
             for dirname in dirnames:
                 role = ARCHITECTURE_VOCABULARY.get(dirname.lower())
-                if not role or dirname.lower() in seen:
+                if not role:
                     continue
-                seen[dirname.lower()] = (
-                    role,
-                    _relative_posix(Path(dirpath, dirname), project_root),
+                matched.append(
+                    (role, _relative_posix(Path(dirpath, dirname), project_root))
                 )
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
 
     findings = []
-    for name in sorted(seen):
-        role, relative_dir = seen[name]
+    for role, relative_dir in sorted(matched, key=lambda item: item[1]):
         findings.append(
             make_finding(
                 f"o diretório `{relative_dir}` sugere {role}",
@@ -214,15 +271,30 @@ def _handle_architecture_explainer(project_root, arguments):
             )
         )
 
+    scope_limitations = list(ARCHITECTURE_LIMITATIONS)
+    if gitignore_applied:
+        scope_limitations.extend(GITIGNORE_SCOPE_LIMITATIONS)
+
     return {
-        "findings": findings[:MAX_FINDINGS],
-        "directories_matched": len(seen),
-        "scope_limitations": list(ARCHITECTURE_LIMITATIONS),
+        "findings": _validated(findings[:MAX_FINDINGS]),
+        # Conta diretórios casados, não palavras do vocabulário: agregar por
+        # palavra descartava evidência disponível e fazia o contador afirmar
+        # cobertura que o payload não tinha.
+        "directories_matched": len(matched),
+        "findings_truncated": len(findings) > MAX_FINDINGS,
+        "gitignore_applied": gitignore_applied,
+        "unreadable_entries_skipped": counters["unreadable_entries_skipped"],
+        "scope_limitations": scope_limitations,
     }
 
 
 ARCHITECTURE_EXPLAINER_OUTPUT_SCHEMA = findings_output_schema(
-    {"directories_matched": {"type": "integer"}}
+    {
+        "directories_matched": {"type": "integer"},
+        "findings_truncated": {"type": "boolean"},
+        "gitignore_applied": {"type": "boolean"},
+        "unreadable_entries_skipped": {"type": "integer"},
+    }
 )
 
 
@@ -294,11 +366,19 @@ def _handle_code_structure_analyzer(project_root, arguments):
     findings = []
     files_analyzed = 0
     files_unparseable = 0
+    files_skipped_by_cap = 0
+    findings_truncated = False
 
     try:
         for file_path, relative_file in _iter_project_files(project_root, counters):
+            # Corte em fronteira de ARQUIVO, nunca no meio. Devolver 3 de 14
+            # findings de um arquivo com confiança HIGH faria o consumidor
+            # concluir que o arquivo define 3 coisas — cada finding verdadeiro,
+            # a completude implícita falsa.
             if len(findings) >= MAX_FINDINGS:
-                break
+                findings_truncated = True
+                files_skipped_by_cap += 1
+                continue
 
             extension = Path(relative_file).suffix
             if extension != ".py" and extension not in HEURISTIC_EXTENSIONS:
@@ -312,7 +392,12 @@ def _handle_code_structure_analyzer(project_root, arguments):
             if extension == ".py":
                 try:
                     findings.extend(_python_structure_findings(text, relative_file))
-                except SyntaxError:
+                except (SyntaxError, ValueError, RecursionError, MemoryError):
+                    # `ast.parse` levanta mais que SyntaxError: ValueError para
+                    # NUL byte além da janela de sniff, RecursionError/MemoryError
+                    # para arquivo patológico. Sem enumerar todos, UM arquivo
+                    # estranho no projeto-alvo derrubava a tool inteira e
+                    # devolvia zero findings sobre os outros trezentos.
                     files_unparseable += 1
                     continue
             else:
@@ -323,20 +408,31 @@ def _handle_code_structure_analyzer(project_root, arguments):
         raise ToolError("não foi possível varrer o diretório do projeto") from error
 
     return {
-        "findings": findings[:MAX_FINDINGS],
+        "findings": _validated(findings),
         "files_analyzed": files_analyzed,
         "files_unparseable": files_unparseable,
+        "files_skipped_by_cap": files_skipped_by_cap,
+        "findings_truncated": findings_truncated,
+        "unreadable_entries_skipped": counters["unreadable_entries_skipped"],
         "scope_limitations": list(STRUCTURE_LIMITATIONS),
     }
 
 
 CODE_STRUCTURE_OUTPUT_SCHEMA = findings_output_schema(
-    {"files_analyzed": {"type": "integer"}, "files_unparseable": {"type": "integer"}}
+    {
+        "files_analyzed": {"type": "integer"},
+        "files_unparseable": {"type": "integer"},
+        "files_skipped_by_cap": {"type": "integer"},
+        "findings_truncated": {"type": "boolean"},
+        "unreadable_entries_skipped": {"type": "integer"},
+    }
 )
 
 
 DEPENDENCY_LIMITATIONS = (
-    "`package.json` e `requirements.txt` são parseados de verdade: confiança HIGH",
+    "`package.json` é parseado com `json`, e cada linha de `requirements.txt` é validada contra a forma PEP 508: confiança HIGH",
+    "linha de `requirements.txt` que não casa PEP 508 — URL, VCS, path local, `-e` — é contada em `lines_unrecognized`, nunca emitida como dependência",
+    "de `pyproject.toml` só o array `dependencies` de `[project]` é lido; `[tool.poetry.dependencies]` não é. `Cargo.toml`, `go.mod`, `Pipfile`, `peerDependencies` e `optionalDependencies` não são lidos",
     "`pyproject.toml` é extraído por regex — Python 3.9 não tem `tomllib` na "
     "stdlib, e adicionar dependência para ler dependência foi recusado: "
     "confiança LOW",
@@ -351,11 +447,24 @@ DEPENDENCY_LIMITATIONS = (
 # em vez de disfarçada com uma regex mais ambiciosa e mais frágil.
 PYPROJECT_DEPENDENCIES = re.compile(r"dependencies\s*=\s*\[([^\]]*)\]", re.DOTALL)
 PYPROJECT_ENTRY = re.compile(r'["\']([A-Za-z0-9._-]+)')
-REQUIREMENT_NAME = re.compile(r"^([A-Za-z0-9._-]+)")
+# PEP 508: nome, extras opcionais, e então especificador/marker/fim. Uma
+# linha que não casa isto (URL, VCS, path local, -e) NÃO é uma dependência
+# declarada — emiti-la como `manifest-read`/HIGH seria vender regex como
+# parsing de formato bem definido.
+REQUIREMENT_SPEC = re.compile(
+    r"^(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)"
+    r"(?:\[[^\]]*\])?"
+    r"\s*(?:[=<>!~;@].*)?$"
+)
 
 
 def _package_json_findings(text, relative_file):
     data = json.loads(text)
+    # `json.loads("[1,2,3]")` sucede; o `.get` seguinte levantaria AttributeError,
+    # fora do except do chamador. Manifesto cujo topo não é objeto é malformado
+    # para o nosso propósito.
+    if not isinstance(data, dict):
+        raise ValueError("package.json não é um objeto no topo")
     findings = []
     for section in ("dependencies", "devDependencies"):
         entries = data.get(section)
@@ -373,22 +482,32 @@ def _package_json_findings(text, relative_file):
 
 
 def _requirements_findings(text, relative_file):
+    """Só linhas que casam a forma PEP 508 são dependências declaradas.
+
+    Linha de URL, VCS, path local ou `-e` é contada como não reconhecida em
+    vez de ter o primeiro token recortado por regex e emitido como nome de
+    pacote — que produzia `https` e `git` com confiança HIGH.
+    """
     findings = []
+    unrecognized = 0
     for line_number, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
-        if not stripped or stripped.startswith("#") or stripped.startswith("-"):
+        if not stripped or stripped.startswith("#"):
             continue
-        match = REQUIREMENT_NAME.match(stripped)
+
+        match = REQUIREMENT_SPEC.match(stripped)
         if not match:
+            unrecognized += 1
             continue
+
         findings.append(
             make_finding(
-                f"`{match.group(1)}` está declarada em requirements.txt",
+                f"`{match.group('name')}` está declarada em requirements.txt",
                 "manifest-read",
                 [make_evidence(relative_file, line_number, stripped)],
             )
         )
-    return findings
+    return findings, unrecognized
 
 
 def _pyproject_findings(text, relative_file):
@@ -425,6 +544,7 @@ def _handle_dependency_analyzer(project_root, arguments):
     findings = []
     manifests_found = []
     manifests_unparseable = []
+    lines_unrecognized = 0
 
     for name in sorted(MANIFEST_PARSERS):
         manifest_path = os.path.join(project_root, name)
@@ -438,16 +558,21 @@ def _handle_dependency_analyzer(project_root, arguments):
             continue
 
         try:
-            findings.extend(MANIFEST_PARSERS[name](text, name))
-        except (ValueError, TypeError):
+            produced = MANIFEST_PARSERS[name](text, name)
+            if isinstance(produced, tuple):
+                produced, unrecognized = produced
+                lines_unrecognized += unrecognized
+            findings.extend(produced)
+        except (ValueError, TypeError, AttributeError):
             # Manifesto malformado é reportado como não-parseável. Cair numa
             # regex de resgate produziria dependências que ninguém declarou.
             manifests_unparseable.append(name)
 
     return {
-        "findings": findings[:MAX_FINDINGS],
+        "findings": _validated(findings[:MAX_FINDINGS]),
         "manifests_found": manifests_found,
         "manifests_unparseable": manifests_unparseable,
+        "lines_unrecognized": lines_unrecognized,
         "scope_limitations": list(DEPENDENCY_LIMITATIONS),
     }
 
@@ -456,5 +581,6 @@ DEPENDENCY_OUTPUT_SCHEMA = findings_output_schema(
     {
         "manifests_found": {"type": "array", "items": {"type": "string"}},
         "manifests_unparseable": {"type": "array", "items": {"type": "string"}},
+        "lines_unrecognized": {"type": "integer"},
     }
 )
