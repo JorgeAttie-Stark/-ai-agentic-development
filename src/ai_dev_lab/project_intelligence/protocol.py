@@ -1,164 +1,23 @@
 """Servidor MCP sobre stdio: JSON-RPC 2.0 newline-delimited.
 
-Escopo do Milestone 0: `initialize`, `tools/list`, `tools/call` para uma
-única tool real (`project_info`). Ver docs/plan-project-intelligence-mcp.md,
-seção "Proposed Architecture", para o desenho completo.
+Transporte puro — dispatch de `initialize`, `tools/list`, `tools/call` e o
+loop `serve_stdio`. As tools em si (`project_info`, `list_files`, Milestone 0
+e 1) vivem em `exploration.py`; este módulo só roteia. Ver
+docs/plan-project-intelligence-mcp.md, seção "Proposed Architecture", para o
+desenho completo.
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
-from pathlib import Path
+
+from .errors import ToolError
+from .exploration import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "project-intel", "version": "0.1.0"}
-
-MAX_FILES_SCANNED = 20_000
-MAX_FILE_SIZE_FOR_LINE_COUNT = 5 * 1024 * 1024
-BINARY_SNIFF_BYTES = 8192
-
-KNOWN_MANIFESTS = (
-    "package.json",
-    "requirements.txt",
-    "pyproject.toml",
-    "setup.py",
-    "Pipfile",
-    "Cargo.toml",
-    "go.mod",
-    "pom.xml",
-    "build.gradle",
-    "Gemfile",
-    "composer.json",
-)
-
-
-class ToolError(Exception):
-    """Falha esperada de execução de uma tool — mensagem já é segura para o cliente."""
-
-
-def _is_binary(file_path):
-    with open(file_path, "rb") as handle:
-        chunk = handle.read(BINARY_SNIFF_BYTES)
-    return b"\x00" in chunk
-
-
-def _make_walk_error_handler(project_root, counters):
-    """Só a raiz do projeto é fatal — um subdiretório inacessível (permissão,
-    symlink quebrado, socket, ...) é degradação esperada de uma árvore
-    arbitrária, não motivo para abortar a varredura inteira.
-    """
-    project_root_str = str(project_root)
-
-    def _handle_walk_error(error):
-        if error.filename == project_root_str:
-            raise error
-        counters["unreadable_entries_skipped"] += 1
-
-    return _handle_walk_error
-
-
-def _handle_project_info(project_root, arguments):
-    files_by_extension = {}
-    total_files = 0
-    total_lines = 0
-    binary_files_skipped = 0
-    large_files_skipped = 0
-    scan_truncated = False
-    counters = {"unreadable_entries_skipped": 0}
-
-    try:
-        for dirpath, dirnames, filenames in os.walk(
-            project_root,
-            onerror=_make_walk_error_handler(project_root, counters),
-            followlinks=False,
-        ):
-            if ".git" in dirnames:
-                dirnames.remove(".git")
-
-            for filename in filenames:
-                if total_files >= MAX_FILES_SCANNED:
-                    scan_truncated = True
-                    break
-
-                file_path = os.path.join(dirpath, filename)
-                extension = Path(filename).suffix
-                files_by_extension[extension] = files_by_extension.get(extension, 0) + 1
-                total_files += 1
-
-                # Um arquivo por vez: symlink quebrado, permissão negada ou
-                # socket não pode abortar a varredura inteira, só o arquivo.
-                try:
-                    file_size = os.path.getsize(file_path)
-                    if file_size > MAX_FILE_SIZE_FOR_LINE_COUNT:
-                        large_files_skipped += 1
-                        continue
-
-                    if _is_binary(file_path):
-                        binary_files_skipped += 1
-                        continue
-
-                    with open(file_path, "r", encoding="utf-8", errors="ignore") as handle:
-                        total_lines += sum(1 for _ in handle)
-                except OSError:
-                    counters["unreadable_entries_skipped"] += 1
-
-            if scan_truncated:
-                break
-    except OSError as error:
-        raise ToolError("não foi possível varrer o diretório do projeto") from error
-
-    manifests_present = [
-        name for name in KNOWN_MANIFESTS if os.path.isfile(os.path.join(project_root, name))
-    ]
-
-    return {
-        "files_by_extension": files_by_extension,
-        "total_files": total_files,
-        "total_lines": total_lines,
-        "manifests_present": manifests_present,
-        "binary_files_skipped": binary_files_skipped,
-        "large_files_skipped": large_files_skipped,
-        "unreadable_entries_skipped": counters["unreadable_entries_skipped"],
-        "scan_truncated": scan_truncated,
-    }
-
-
-PROJECT_INFO_OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "files_by_extension": {"type": "object", "additionalProperties": {"type": "integer"}},
-        "total_files": {"type": "integer"},
-        "total_lines": {"type": "integer"},
-        "manifests_present": {"type": "array", "items": {"type": "string"}},
-        "binary_files_skipped": {"type": "integer"},
-        "large_files_skipped": {"type": "integer"},
-        "unreadable_entries_skipped": {"type": "integer"},
-        "scan_truncated": {"type": "boolean"},
-    },
-    "required": [
-        "files_by_extension",
-        "total_files",
-        "total_lines",
-        "manifests_present",
-        "binary_files_skipped",
-        "large_files_skipped",
-        "unreadable_entries_skipped",
-        "scan_truncated",
-    ],
-    "additionalProperties": False,
-}
-
-TOOL_REGISTRY = {
-    "project_info": {
-        "description": "Contagem de arquivos, linhas e manifestos conhecidos na raiz do projeto.",
-        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
-        "output_schema": PROJECT_INFO_OUTPUT_SCHEMA,
-        "handler": _handle_project_info,
-    },
-}
 
 
 def _error_response(request_id, code, message):

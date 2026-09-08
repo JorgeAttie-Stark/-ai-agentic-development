@@ -22,9 +22,9 @@ AI Engineering usando Claude Code.
 
 ```text
 src/ai_dev_lab/
-    project_intelligence/    # servidor MCP sobre stdio (Milestone 0)
+    project_intelligence/    # servidor MCP sobre stdio (Milestone 0 e 1)
 tests/
-    project_intelligence/    # testes de config.py e protocol.py
+    project_intelligence/    # testes de config.py, protocol.py e exploration.py
 docs/
 ```
 
@@ -35,7 +35,7 @@ O pacote importável é `ai_dev_lab`, dentro de `src/`.
 Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
 para um `projectRoot` — por padrão o `cwd` do processo, com `--root` como
 override opcional. Hoje expõe `initialize`, `tools/list` e `tools/call` para
-uma única tool: `project_info`.
+duas tools: `project_info` e `list_files`.
 
 Rodar o servidor apontado para um projeto alvo:
 

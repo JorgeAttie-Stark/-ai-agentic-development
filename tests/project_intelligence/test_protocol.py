@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_dev_lab.project_intelligence import protocol
+from ai_dev_lab.project_intelligence import exploration, protocol
 from ai_dev_lab.project_intelligence.protocol import (
     SUPPORTED_PROTOCOL_VERSION,
     dispatch,
@@ -121,14 +121,14 @@ class TestProtocolErrors(unittest.TestCase):
 
 class TestToolsList(unittest.TestCase):
 
-    def test_lists_only_project_info_with_camel_case_schema(self):
+    def test_lists_both_registered_tools_with_camel_case_schema(self):
         context = make_context(initialized=True)
         request = {"jsonrpc": "2.0", "id": 7, "method": "tools/list"}
 
         response = dispatch(request, context)
 
         tools = response["result"]["tools"]
-        self.assertEqual(len(tools), 1)
+        self.assertEqual(len(tools), 2)
         self.assertEqual(tools[0]["name"], "project_info")
         self.assertIn("inputSchema", tools[0])
         self.assertNotIn("input_schema", tools[0])
@@ -188,6 +188,31 @@ class TestToolsList(unittest.TestCase):
         tools = {tool["name"]: tool for tool in response["result"]["tools"]}
         self.assertIn("outputSchema", tools["project_info"])
         self.assertEqual(tools["project_info"]["outputSchema"]["type"], "object")
+
+    def test_list_files_schema_has_empty_input_schema_without_root_id(self):
+        context = make_context(initialized=True)
+        request = {"jsonrpc": "2.0", "id": 74, "method": "tools/list"}
+
+        response = dispatch(request, context)
+
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        schema = tools["list_files"]["inputSchema"]
+        self.assertEqual(
+            schema, {"type": "object", "properties": {}, "additionalProperties": False}
+        )
+        self.assertNotIn("root_id", schema["properties"])
+
+    def test_list_files_declares_output_schema(self):
+        context = make_context(initialized=True)
+        request = {"jsonrpc": "2.0", "id": 75, "method": "tools/list"}
+
+        response = dispatch(request, context)
+
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        schema = tools["list_files"]["outputSchema"]
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("total_files", schema["properties"])
+        self.assertIn("files", schema["properties"])
 
 
 class TestToolsCall(unittest.TestCase):
@@ -276,7 +301,7 @@ class TestToolsCall(unittest.TestCase):
             "params": {"name": "project_info", "arguments": {}},
         }
 
-        with patch.object(protocol, "MAX_FILES_SCANNED", 2):
+        with patch.object(exploration, "MAX_FILES_SCANNED", 2):
             response = dispatch(request, context)
 
         content = response["result"]["structuredContent"]
@@ -310,7 +335,7 @@ class TestToolsCall(unittest.TestCase):
             "params": {"name": "project_info", "arguments": {}},
         }
 
-        with patch.object(protocol, "MAX_FILE_SIZE_FOR_LINE_COUNT", 0):
+        with patch.object(exploration, "MAX_FILE_SIZE_FOR_LINE_COUNT", 0):
             response = dispatch(request, context)
 
         content = response["result"]["structuredContent"]
@@ -369,6 +394,65 @@ class TestToolsCall(unittest.TestCase):
                 "id": 13,
                 "method": "tools/call",
                 "params": {"name": "project_info", "arguments": {}},
+            }
+
+            response = dispatch(request, context)
+
+            self.assertEqual(response["error"]["code"], -32603)
+            self.assertNotIn(str(root), response["error"]["message"])
+
+    def test_list_files_returns_exact_result_for_fixture(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 80,
+            "method": "tools/call",
+            "params": {"name": "list_files", "arguments": {}},
+        }
+
+        response = dispatch(request, context)
+
+        content = response["result"]["structuredContent"]
+        self.assertEqual(
+            content["files"],
+            ["app.js", "data.bin", "main.py", "nested/util.py", "package.json"],
+        )
+        self.assertEqual(content["total_files"], 5)
+        self.assertFalse(content["scan_truncated"])
+        self.assertEqual(content["unreadable_entries_skipped"], 0)
+        self.assertFalse(content["gitignore_applied"])
+        self.assertEqual(content["scope_limitations"], [])
+
+    def test_list_files_wraps_result_in_call_tool_result_envelope(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 81,
+            "method": "tools/call",
+            "params": {"name": "list_files", "arguments": {}},
+        }
+
+        response = dispatch(request, context)
+
+        result = response["result"]
+        self.assertIn("content", result)
+        self.assertEqual(result["content"][0]["type"], "text")
+        parsed_text = json.loads(result["content"][0]["text"])
+        self.assertEqual(parsed_text, result["structuredContent"])
+        self.assertFalse(result["isError"])
+
+    def test_list_files_missing_root_returns_internal_error_without_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "will_be_deleted"
+            root.mkdir()
+            context = make_context(project_root=root, initialized=True)
+            shutil.rmtree(root)
+
+            request = {
+                "jsonrpc": "2.0",
+                "id": 82,
+                "method": "tools/call",
+                "params": {"name": "list_files", "arguments": {}},
             }
 
             response = dispatch(request, context)

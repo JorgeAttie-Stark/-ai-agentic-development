@@ -266,9 +266,11 @@ OK
 ## 🔌 Project Intelligence MCP
 
 An MCP server over stdio (JSON-RPC 2.0, one request per line) that points at an
-arbitrary `projectRoot` — not necessarily this repository. Milestone 0 proves
-the end-to-end wiring: `initialize`, `tools/list` and `tools/call` for a single
-tool, `project_info` (file/line counts and known manifests at the target root).
+arbitrary `projectRoot` — not necessarily this repository. Milestone 0 proved
+the end-to-end wiring with `project_info` (file/line counts and known
+manifests at the target root). Milestone 1 adds `list_files` (file inventory
+at the target root, `.git/` always ignored, best-effort top-level
+`.gitignore`).
 
 Run it directly, pointed at a target project:
 
