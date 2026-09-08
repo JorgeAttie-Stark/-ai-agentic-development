@@ -47,7 +47,7 @@ Existentes, usados como contexto e precedente:
 | `README.md:12` | badge declara "Python 3.9+"; nenhum arquivo do repo fixa `3.9.6` |
 | `README.md:242` | comando canônico, já alinhado ao `CLAUDE.md` |
 | `README.md:261-274` | checklist de experimentos — MCP é o único item de cobertura zero |
-| `src/ai_dev_lab/parity.py`, `tests/test_parity.py` | único precedente real de estilo do repo |
+| `src/ai_dev_lab/project_intelligence/`, `tests/project_intelligence/` | precedente de estilo do repo. Até o Milestone 0 esse papel era de `parity.py`/`test_parity.py`, removidos depois |
 | `pyproject.toml` | **0 bytes** — nenhuma dependência, nenhum `[project]` declarado |
 | `.claude/agents/planner.md`, `python-developer.md`, `tester.md`, `code-reviewer.md` | contratos e limites (2 rodadas; `tester` só escreve em `tests/`; `reviewer` sem `Edit`/`Write`) |
 | `.claude/commands/feature.md:1-16` | orquestrador; limite de 2 rodadas somando passos 3 e 4 |
@@ -74,6 +74,11 @@ Novos, propostos para Milestone 0 e 1:
 ---
 
 ## Current Architecture
+
+> 📌 **Snapshot.** Esta seção descreve o repositório **no momento em que o plano foi
+> escrito**, antes do Milestone 0. Está deliberadamente congelada — é o que justifica
+> as decisões tomadas em `Proposed Architecture`. Para o estado atual, ver o `README.md`.
+> Os arquivos `parity.py` e `test_parity.py` citados abaixo já foram removidos.
 
 O repositório hoje tem um único módulo de produção (`src/ai_dev_lab/parity.py`, 5 linhas)
 e sua suíte (`tests/test_parity.py`, 32 linhas), descobertos via
@@ -283,8 +288,8 @@ src/ai_dev_lab/project_intelligence/
 ```
 
 Primeira vez que o repositório deixa de ser inteiramente flat. Justificado por escala:
-~20 tools em 5 camadas não cabe honestamente num único arquivo do jeito que `parity.py`
-cabe. Apenas `__main__.py`, `config.py`, `protocol.py`, `paths.py` e `exploration.py`
+~20 tools em 5 camadas não cabe honestamente num único arquivo, do jeito que uma função
+isolada cabia. Apenas `__main__.py`, `config.py`, `protocol.py`, `paths.py` e `exploration.py`
 são criados nas etapas detalhadas abaixo — os demais são nomeados só para deixar a
 intenção legível, evitando abstração antes da segunda necessidade real.
 
@@ -464,8 +469,14 @@ servidor que passa 100% dos testes e não aparece no cliente não está pronto.
 
 ### Regressão
 
-`tests/test_parity.py` deve continuar 100% verde em todas as etapas — nenhuma mudança
-em `parity.py`.
+A suíte inteira deve continuar 100% verde em todas as etapas. Cada milestone só
+acrescenta testes — nenhum teste de milestone anterior pode ser removido ou
+enfraquecido para acomodar código novo.
+
+> Nota histórica: até o Milestone 0 a baseline de regressão era `tests/test_parity.py`,
+> o exercício trivial de `is_even` que serviu para exercitar as skills de TDD e Code
+> Review antes de existir código de verdade. Foi removido depois que o Milestone 0
+> passou a ser a suíte real do projeto.
 
 ---
 
@@ -577,7 +588,7 @@ para o que ela entrega:
    forma do mapeamento `roots`, e os edge cases listados em Testing Strategy.
 6. `PYTHONPATH=src python3 -m unittest discover -s tests` passando 100%, com a saída real
    — copiada, não parafraseada — anexada como evidência pelo `tester`.
-7. Nenhuma regressão em `parity.py`/`test_parity.py`.
+7. Nenhuma regressão na suíte de milestones anteriores.
 8. `README.md` e `CLAUDE.md` atualizados para refletir o novo diretório
    `project_intelligence/`, incluindo o bloco de `claude_desktop_config.json` — com
    `cwd` — necessário para apontar o servidor a um projeto-alvo.

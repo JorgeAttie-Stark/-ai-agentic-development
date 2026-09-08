@@ -22,7 +22,6 @@ AI Engineering usando Claude Code.
 
 ```text
 src/ai_dev_lab/
-    parity.py
     project_intelligence/    # servidor MCP sobre stdio (Milestone 0)
 tests/
     project_intelligence/    # testes de config.py e protocol.py
