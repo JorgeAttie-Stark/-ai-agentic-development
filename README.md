@@ -282,22 +282,35 @@ Run it directly, pointed at a target project:
 PYTHONPATH=src python3 -m ai_dev_lab.project_intelligence --root /path/to/target/project
 ```
 
-Without `--root`, the server uses its own `cwd` as the project root — this is
-the mechanism Claude Desktop relies on when it launches the process. Configure
-it in `claude_desktop_config.json`:
+Configure it in `claude_desktop_config.json`. **`--root` is required here** —
+see the note below:
 
 ```json
 {
   "mcpServers": {
     "project-intel": {
       "command": "python3",
-      "args": ["-m", "ai_dev_lab.project_intelligence"],
-      "cwd": "/path/to/target/project",
+      "args": [
+        "-m", "ai_dev_lab.project_intelligence",
+        "--root", "/path/to/target/project"
+      ],
       "env": { "PYTHONPATH": "/path/to/repo/src" }
     }
   }
 }
 ```
+
+> ⚠️ **Do not use a `cwd` key here.** Claude Desktop does not support `cwd` in
+> `mcpServers` — it silently strips the key when it rewrites the config file.
+> Without `--root`, the server falls back to the app's own working directory and
+> reports a useless inventory (`total_files: 20000`, `scan_truncated: true`) with
+> no error explaining why.
+>
+> Falling back to `cwd` still works when you run the server by hand in a
+> terminal, where the working directory is the shell's and therefore predictable.
+
+Restart Claude Desktop with `Cmd+Q` after editing — closing the window is not
+enough. The tools then appear under the `+` button in the message composer.
 
 Full architecture, scope and roadmap: `docs/plan-project-intelligence-mcp.md`.
 

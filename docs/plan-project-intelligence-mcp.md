@@ -129,32 +129,48 @@ tools/call   ──►   paths confinados a projectRoot
 
 Origem do valor na v1, em ordem de precedência:
 
-1. **`cwd` do processo** — é o mecanismo inicial. O cliente MCP já controla o diretório
-   de trabalho do servidor que ele lança, então nada precisa ser inventado para isso
-   funcionar hoje.
-2. `--root <path>` — override explícito e **opcional**, para quando o `cwd` não é
-   conveniente. Continua sendo configuração de processo, não payload de protocolo.
+1. **`--root <path>`** — a forma canônica e, na prática, **obrigatória** para uso via
+   cliente MCP. Configuração de processo, nunca payload de protocolo.
+2. `cwd` do processo, quando `--root` está ausente — conveniência para invocação manual
+   em terminal, onde o `cwd` é o do shell e portanto previsível.
 3. Falha na **inicialização** se o valor resolvido não existir ou não for diretório: o
    processo não sobe. Não é erro de tool em runtime — é erro de configuração, e deve
    aparecer como tal.
 
-Configuração real, em `claude_desktop_config.json` — o caminho padrão usa `cwd`:
+> ⚠️ **Correção após verificação contra cliente real.** A versão anterior deste plano
+> tratava o `cwd` como o mecanismo inicial, na premissa de que *"o cliente MCP já
+> controla o diretório de trabalho do servidor que ele lança"*. **Essa premissa é falsa
+> para o Claude Desktop:** ele não aceita a chave `cwd` no bloco `mcpServers` — ao
+> reescrever o `claude_desktop_config.json`, ele **descarta** a chave silenciosamente.
+>
+> Sem `--root`, a raiz vira o diretório de trabalho do próprio app. Medido:
+> `total_files: 20000`, `scan_truncated: true`, `unreadable_entries_skipped: 48` — um
+> inventário inútil, e sem nenhum erro que indique a causa.
+>
+> É a mesma classe de erro do `BLOQUEANTE` do `tools/call`: uma suposição sobre o
+> comportamento do cliente que passa em todos os nossos testes e falha no cliente real.
+> Só apareceu ao tentar conectar de verdade — é o argumento mais concreto a favor de o
+> item 10 do Definition of Done existir.
+
+Configuração real, em `claude_desktop_config.json` — `--root` é obrigatório aqui:
 
 ```json
 {
   "mcpServers": {
     "project-intel": {
       "command": "python3",
-      "args": ["-m", "ai_dev_lab.project_intelligence"],
-      "cwd": "/caminho/do/projeto/alvo",
-      "env": { "PYTHONPATH": "/Users/jorge.attie/AgenticIA/src" }
+      "args": [
+        "-m", "ai_dev_lab.project_intelligence",
+        "--root", "/caminho/do/projeto/alvo"
+      ],
+      "env": { "PYTHONPATH": "/caminho/do/repositorio/src" }
     }
   }
 }
 ```
 
-O `--root` existe como alternativa quando não se quer depender do `cwd`, mas não é a
-forma documentada por padrão.
+O `cwd` continua suportado pelo código e é o caminho conveniente para rodar o servidor
+à mão no terminal — mas não é utilizável via `claude_desktop_config.json`.
 
 **Caminho spec-correto, para depois:** a especificação MCP tem a capability `roots`,
 pela qual o **cliente** informa ao servidor quais diretórios estão em escopo, via
@@ -509,9 +525,18 @@ em `parity.py`.
   presente na stdlib desta máquina). Se `test_analyzer` vier a inspecionar suítes, esse
   comportamento pode confundir; é um bug plausível de escapar.
 
+- **Premissas sobre o comportamento do cliente MCP são o risco mais caro deste projeto,
+  e duas já se materializaram.** O payload de `initialize` (pego em revisão de plano) e o
+  `cwd` no `mcpServers` (pego só ao conectar de verdade — ver a nota em
+  `Proposed Architecture §1`). As duas passariam por 100% dos testes automatizados. Regra
+  a carregar: **toda suposição sobre o que o cliente faz precisa ser verificada contra a
+  especificação ou contra um cliente real antes de virar documentação.** Um teste escrito
+  a partir da suposição só confirma a suposição.
+
 - **A capability `roots` fica sem cobertura na v1.** É o mecanismo padronizado do MCP
   para o cliente informar diretórios em escopo, e a ausência dela significa que trocar
-  de projeto-alvo exige reconfigurar e reiniciar o servidor. Aceitável para v1, mas é
+  de projeto-alvo exige editar o `--root` no `claude_desktop_config.json` e reiniciar o
+  app com `Cmd+Q`. Aceitável para v1, mas é
   limitação real de usabilidade — não deve ser esquecida como se fosse detalhe. É também
   o caminho natural para a evolução de múltiplos projetos: quando ela for implementada,
   o mapeamento `roots` do `context` passa a ser alimentado por `roots/list` em vez de

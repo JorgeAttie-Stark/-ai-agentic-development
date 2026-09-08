@@ -51,13 +51,22 @@ Configuração no Claude Desktop (`claude_desktop_config.json`):
   "mcpServers": {
     "project-intel": {
       "command": "python3",
-      "args": ["-m", "ai_dev_lab.project_intelligence"],
-      "cwd": "/caminho/do/projeto/alvo",
+      "args": [
+        "-m", "ai_dev_lab.project_intelligence",
+        "--root", "/caminho/do/projeto/alvo"
+      ],
       "env": { "PYTHONPATH": "/caminho/do/repositorio/src" }
     }
   }
 }
 ```
+
+`--root` é obrigatório aqui. O Claude Desktop não suporta a chave `cwd` em
+`mcpServers` — ele descarta a chave ao reescrever o arquivo de config. Sem
+`--root`, a raiz vira o diretório de trabalho do app e o inventário sai
+inútil, sem erro que indique a causa.
+
+O fallback para `cwd` continua valendo ao rodar o servidor à mão no terminal.
 
 Detalhes de arquitetura, escopo e roadmap completos em
 `docs/plan-project-intelligence-mcp.md`.
