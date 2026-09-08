@@ -9,7 +9,7 @@ poda de `.gitignore` e a caminhada da árvore); o inverso fecharia um ciclo.
 """
 from __future__ import annotations
 
-from . import exploration, understanding
+from . import exploration, inference, understanding
 
 TOOL_REGISTRY = {
     "project_info": {
@@ -86,5 +86,23 @@ TOOL_REGISTRY = {
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "output_schema": understanding.DEPENDENCY_OUTPUT_SCHEMA,
         "handler": understanding._handle_dependency_analyzer,
+    },
+    "data_flow_analyzer": {
+        "description": (
+            "Grafo de CHAMADAS de Python via `ast`. Não é análise de fluxo de dados: "
+            "fluxo real exige CFG, inviável em stdlib. Ver scope_limitations."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": inference.DATA_FLOW_OUTPUT_SCHEMA,
+        "handler": inference._handle_data_flow_analyzer,
+    },
+    "business_rules_analyzer": {
+        "description": (
+            "Localiza CANDIDATOS a regra de negócio e devolve o trecho literal. "
+            "Não descreve a regra — a interpretação cabe a quem lê o snippet."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": inference.BUSINESS_RULES_OUTPUT_SCHEMA,
+        "handler": inference._handle_business_rules_analyzer,
     },
 }

@@ -145,6 +145,9 @@ class TestToolsList(unittest.TestCase):
                 "architecture_explainer",
                 "code_structure_analyzer",
                 "dependency_analyzer",
+                # Camada Inferência — a fronteira epistemológica
+                "data_flow_analyzer",
+                "business_rules_analyzer",
             },
         )
         for tool in tools:
