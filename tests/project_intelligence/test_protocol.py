@@ -152,6 +152,11 @@ class TestToolsList(unittest.TestCase):
                 "security_analyzer",
                 "improvement_analyzer",
                 "test_analyzer",
+                # Camadas Visualização e Documentação — serialização pura
+                "generate_mermaid",
+                "generate_project_report",
+                "generate_architecture_documentation",
+                "generate_project_summary",
             },
         )
         for tool in tools:

@@ -9,7 +9,7 @@ poda de `.gitignore` e a caminhada da árvore); o inverso fecharia um ciclo.
 """
 from __future__ import annotations
 
-from . import analysis, exploration, inference, understanding
+from . import analysis, exploration, inference, presentation, understanding
 
 TOOL_REGISTRY = {
     "project_info": {
@@ -131,5 +131,41 @@ TOOL_REGISTRY = {
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "output_schema": analysis.TEST_ANALYZER_OUTPUT_SCHEMA,
         "handler": analysis._handle_test_analyzer,
+    },
+    "generate_mermaid": {
+        "description": (
+            "Serializa findings de uma tool de análise em diagrama Mermaid. "
+            "Zero análise nova: aresta sólida é HIGH, tracejada é MEDIUM/LOW."
+        ),
+        "input_schema": presentation.MERMAID_INPUT_SCHEMA,
+        "output_schema": presentation.MERMAID_OUTPUT_SCHEMA,
+        "handler": presentation._handle_generate_mermaid,
+    },
+    "generate_project_report": {
+        "description": (
+            "Relatório Markdown completo, com a confiança e o método ao lado de "
+            "cada conclusão. Consome outras tools; não conclui nada."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": presentation.DOCUMENT_OUTPUT_SCHEMA,
+        "handler": presentation._handle_generate_project_report,
+    },
+    "generate_architecture_documentation": {
+        "description": (
+            "Documento de arquitetura observada. Declara ausência de evidência "
+            "em vez de preencher com suposição."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": presentation.DOCUMENT_OUTPUT_SCHEMA,
+        "handler": presentation._handle_generate_architecture_documentation,
+    },
+    "generate_project_summary": {
+        "description": (
+            "Resumo curto do projeto. Mesmas fontes do relatório, menos texto, "
+            "nenhuma síntese nova."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": presentation.DOCUMENT_OUTPUT_SCHEMA,
+        "handler": presentation._handle_generate_project_summary,
     },
 }
