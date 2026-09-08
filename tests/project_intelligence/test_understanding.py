@@ -285,7 +285,11 @@ class ReviewRegressionTests(unittest.TestCase):
                 result = understanding._handle_code_structure_analyzer(root, {})
 
             self.assertTrue(result["findings_truncated"])
-            self.assertGreater(result["files_skipped_by_cap"], 0)
+            # Lista de nomes, não contagem: alinhado ao `inference.py`.
+            self.assertTrue(result["files_skipped_by_cap"])
+            self.assertTrue(
+                all(isinstance(name, str) for name in result["files_skipped_by_cap"])
+            )
 
             # Nenhum arquivo aparece parcialmente: quem entra, entra inteiro.
             per_file = {}

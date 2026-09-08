@@ -178,3 +178,49 @@ class UnknownFieldRegressionTests(unittest.TestCase):
 
         with self.assertRaises(ToolError):
             validate_finding(finding)
+
+
+class CapSemanticsAreUniformTests(unittest.TestCase):
+    """O teto tem a MESMA semântica em toda tool que emite findings.
+
+    Este teste existe porque a inconsistência real aconteceu: eu corrigi a
+    semântica do teto no `inference.py` quando o reviewer apontou, e não voltei
+    para aplicar em `understanding.py`. As 6 tools do Milestone 2 ficaram com o
+    comportamento antigo — teto como piso mole, `files_skipped_by_cap` como
+    contagem — e nada na suíte percebeu.
+
+    Só apareceu quando eu exercitei as 18 tools pelo processo real de stdio e
+    comparei os números: 336 findings numa tool com teto declarado de 300.
+    """
+
+    def _findings_tools(self):
+        from ai_dev_lab.project_intelligence.registry import TOOL_REGISTRY
+
+        return {
+            name: spec
+            for name, spec in TOOL_REGISTRY.items()
+            if "findings" in spec["output_schema"].get("properties", {})
+        }
+
+    def test_no_tool_exceeds_the_shared_cap(self):
+        from pathlib import Path as P
+
+        from ai_dev_lab.project_intelligence.scanning import MAX_FINDINGS
+
+        root = P(__file__).parent.parent.parent
+        for name, spec in self._findings_tools().items():
+            with self.subTest(tool=name):
+                result = spec["handler"](root, {})
+                self.assertLessEqual(len(result["findings"]), MAX_FINDINGS)
+
+    def test_files_skipped_by_cap_is_always_a_list_of_names(self):
+        from pathlib import Path as P
+
+        root = P(__file__).parent.parent.parent
+        for name, spec in self._findings_tools().items():
+            skipped = spec["handler"](root, {}).get("files_skipped_by_cap")
+            if skipped is None:
+                continue
+            with self.subTest(tool=name):
+                self.assertIsInstance(skipped, list)
+                self.assertTrue(all(isinstance(item, str) for item in skipped))
