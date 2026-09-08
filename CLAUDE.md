@@ -54,6 +54,8 @@ fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools
 | `architecture_explainer` | `name-pattern` | `MEDIUM`, capado |
 | `code_structure_analyzer` | `ast-parse` (Python) / `regex-heuristic` (resto) | `HIGH` / `LOW` |
 | `dependency_analyzer` | `manifest-read` / `regex-heuristic` (TOML) | `HIGH` / `LOW` |
+| `data_flow_analyzer` | `ast-parse` — grafo de **chamadas**, não fluxo de dados | `HIGH` |
+| `business_rules_analyzer` | `regex-heuristic` — localiza candidatos, **não descreve a regra** | `LOW` |
 
 ### O envelope de evidência
 

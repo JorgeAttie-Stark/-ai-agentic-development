@@ -104,7 +104,12 @@ def _iter_project_files(project_root, counters):
         if patterns:
             _prune_gitignore_dirs(dirnames, dirpath, project_root, patterns)
 
-        for filename in filenames:
+        # Ordem determinística. Sem isto a travessia segue a ordem do
+        # filesystem, e quando um teto de findings corta, *quais* arquivos
+        # entram varia por máquina e por execução — o consumidor recebe um
+        # subconjunto arbitrário e irreprodutível.
+        dirnames.sort()
+        for filename in sorted(filenames):
             relative_file = _relative_posix(Path(dirpath, filename), project_root)
             if patterns and _matches_any_gitignore_pattern(patterns, filename, relative_file):
                 continue
