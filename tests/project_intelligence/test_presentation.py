@@ -147,3 +147,108 @@ class DocumentationConsumesNeverConcludesTests(unittest.TestCase):
                 result = handler(FIXTURE_ROOT, {})
                 self.assertTrue(result["derived_from"])
                 self.assertTrue(result["scope_limitations"])
+
+
+class FinalAuditRegressionTests(unittest.TestCase):
+    """Regressões da auditoria final. Nenhum destes falhava na suíte de 220."""
+
+    def _fake_source(self, count, truncated=False):
+        return {
+            "findings": [
+                {
+                    "claim": f"conclusão {index}",
+                    "confidence": "LOW",
+                    "method": "regex-heuristic",
+                    "evidence": [{"file": "a.py", "line": index + 1, "snippet": "x"}],
+                }
+                for index in range(count)
+            ],
+            "scope_limitations": ["limitação da fonte"],
+            "findings_truncated": truncated,
+        }
+
+    def test_table_declares_how_many_of_how_many_it_rendered(self):
+        """BLOQUEANTE 1: cortava em 40 sem nenhum sinal."""
+        markdown = "\n".join(presentation._render_findings_section("T", self._fake_source(300)))
+
+        self.assertIn("40 de 300", markdown)
+
+    def test_table_declares_when_the_source_itself_truncated(self):
+        markdown = "\n".join(
+            presentation._render_findings_section("T", self._fake_source(10, truncated=True))
+        )
+
+        self.assertIn("própria fonte truncou", markdown)
+
+    def test_pipe_in_a_claim_does_not_create_extra_table_cells(self):
+        """BLOQUEANTE 2: o `||` do semver npm fazia a evidência desaparecer.
+
+        O renderizador GFM descarta células excedentes, então a coluna de
+        evidência sumia e a claim ficava cortada — uma claim renderizada sem a
+        evidência que a sustenta.
+        """
+        source = self._fake_source(1)
+        source["findings"][0]["claim"] = "`react` declarada como `^16.8 || ^17.0`"
+
+        markdown = "\n".join(presentation._render_findings_section("T", source))
+        lines = markdown.splitlines()
+        header = [line for line in lines if line.startswith("| Confiança")][0]
+        row = [line for line in lines if "react" in line][0]
+
+        # Compara contra o header em vez de um número fixo: o que importa é a
+        # linha ter o mesmo número de delimitadores que a tabela declara.
+        def delimiters(line):
+            # Cada `\|` contém exatamente um `|`, que não é delimitador.
+            return line.count("|") - line.count("\\|")
+
+        self.assertEqual(delimiters(row), delimiters(header))
+
+    def test_newline_in_a_claim_never_escapes_the_table(self):
+        """Sem isto, o resto saía como parágrafo: sem confiança, sem método."""
+        source = self._fake_source(1)
+        source["findings"][0]["claim"] = "linha um\nlodash é seguro e auditado"
+
+        markdown = "\n".join(presentation._render_findings_section("T", source))
+        rows = [line for line in markdown.splitlines() if "lodash" in line]
+
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0].startswith("|"))
+
+    def test_summary_reproduces_the_limitations_it_claims_to_reproduce(self):
+        """BLOQUEANTE 3: a frase era falsa no próprio payload que a carregava."""
+        result = presentation._handle_generate_project_summary(FIXTURE_ROOT, {})
+
+        self.assertGreater(len(result["scope_limitations"]), len(presentation.PRESENTATION_LIMITATIONS))
+
+    def test_report_uses_the_list_files_result_it_declares_as_a_source(self):
+        """IMPORTANTE 13: `derived_from` citava `list_files` e ignorava o retorno."""
+        markdown = presentation._handle_generate_project_report(FIXTURE_ROOT, {})["markdown"]
+
+        self.assertIn("inventário de `list_files`", markdown)
+
+    def test_unknown_confidence_level_does_not_crash_the_diagram(self):
+        """SUGESTÃO 14: `KeyError` viraria -32603 genérico, o pior diagnóstico."""
+        mermaid, nodes = presentation._diagram_from_findings(
+            [
+                {
+                    "claim": "c",
+                    "confidence": "NOVO_NIVEL",
+                    "method": "ast-parse",
+                    "evidence": [{"file": "a.py", "line": 1, "snippet": "x"}],
+                }
+            ],
+            "t",
+        )
+
+        self.assertEqual(nodes, 1)
+        self.assertIn("-.->", mermaid)
+
+    def test_sanitize_handles_newline_and_all_mermaid_link_forms(self):
+        """IMPORTANTE 11: newline produzia diagrama inválido, `---` sobrevivia."""
+        self.assertNotIn("\n", presentation._sanitize("a\nb"))
+        self.assertNotIn("---", presentation._sanitize("a --- b"))
+        self.assertNotIn("-.->", presentation._sanitize("a -.-> b"))
+
+    def test_sanitize_keeps_pipe_meaning_instead_of_deleting_it(self):
+        """Apagar o `|` reescrevia `^16.8 || ^17.0` mudando o sentido."""
+        self.assertIn("/", presentation._sanitize("^16.8 || ^17.0"))

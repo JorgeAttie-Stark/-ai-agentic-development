@@ -80,18 +80,6 @@ STRUCTURE_HEURISTICS = (
 HEURISTIC_EXTENSIONS = {".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".rb", ".php", ".cs"}
 
 
-def validated(findings):
-    """Revalida todo finding antes de ele ir para a wire.
-
-    `make_finding` já valida na construção, mas isto fecha o caminho de quem
-    montar o dict à mão em qualquer tool futura — e é barato: o custo é O(n)
-    sobre uma lista já limitada por teto.
-    """
-    for finding in findings:
-        validate_finding(finding)
-    return findings
-
-
 def _handle_project_map(project_root, arguments):
     """Árvore de diretórios com contagem de arquivos. Factual, sem findings.
 
@@ -529,6 +517,7 @@ def _handle_dependency_analyzer(project_root, arguments):
 
     return {
         "findings": validated(findings[:MAX_FINDINGS]),
+        "findings_truncated": len(findings) > MAX_FINDINGS,
         "manifests_found": manifests_found,
         "manifests_unparseable": manifests_unparseable,
         "lines_unrecognized": lines_unrecognized,
@@ -538,6 +527,7 @@ def _handle_dependency_analyzer(project_root, arguments):
 
 DEPENDENCY_OUTPUT_SCHEMA = findings_output_schema(
     {
+        "findings_truncated": {"type": "boolean"},
         "manifests_found": {"type": "array", "items": {"type": "string"}},
         "manifests_unparseable": {"type": "array", "items": {"type": "string"}},
         "lines_unrecognized": {"type": "integer"},

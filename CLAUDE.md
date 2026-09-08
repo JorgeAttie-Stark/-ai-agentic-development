@@ -34,7 +34,7 @@ O pacote importável é `ai_dev_lab`, dentro de `src/`.
 
 Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
 para um `projectRoot` resolvido de `--root`, com o `cwd` do processo como
-fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools:
+fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para dezoito tools:
 
 **Camada Exploração** — retrieval pura, sem envelope:
 
@@ -92,9 +92,8 @@ Onde não há evidência, a tool reporta **ausência**, não palpite. Lista de
 findings vazia com limitação declarada é resposta melhor que inferência fraca
 apresentada como descoberta.
 
-As três são retrieval pura — devolvem fato observado, sem envelope de
-`findings`/`confidence`. Esse envelope começa no Milestone 2, com as tools de
-inferência.
+As cinco primeiras são retrieval pura — devolvem fato observado, sem envelope
+de `findings`/`confidence`.
 
 Rodar o servidor apontado para um projeto alvo:
 

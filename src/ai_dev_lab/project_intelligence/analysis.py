@@ -23,7 +23,6 @@ esse limite que separa a tool de um gerador de alarme:
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -36,14 +35,22 @@ from .scanning import MAX_FINDINGS, iter_project_files, read_text, validated
 # constante não é, e a regex não distingue os dois.
 SECURITY_PATTERNS = (
     ("execução dinâmica de código", re.compile(r"\b(?:eval|exec)\s*\(")),
-    ("execução de comando de sistema", re.compile(r"\b(?:os\.system|subprocess\.\w+)\s*\(")),
+    ("execução de comando de sistema", re.compile(
+        r"\b(?:os\.system|os\.popen|subprocess\.\w+)\s*\(")),
     ("shell habilitado em subprocess", re.compile(r"shell\s*=\s*True")),
     ("desserialização de dados não confiáveis", re.compile(r"\b(?:pickle|marshal)\.loads?\s*\(")),
     ("possível credencial literal no código", re.compile(
-        r"\b(?:password|passwd|secret|api_key|apikey|token|private_key)\s*[=:]\s*['\"][^'\"]{4,}",
+        r"(?:^|[^\w.])[\w.]*(?:password|passwd|secret|api_?key|token|private_key)"
+        r"\s*[=:]\s*['\"]?[^\s'\"]{6,}",
         re.IGNORECASE)),
+    # Exige vizinhança de SQL de verdade. Sem isso, `def update(self, d):
+    # return self.total + 1` casava — e a claim afirmava "consulta SQL" onde
+    # não havia SQL nenhum. O hedge "padrão de" cobre incerteza sobre risco;
+    # não cobre nomear um construto que a regex não observou.
     ("concatenação em consulta SQL", re.compile(
-        r"(?:SELECT|INSERT|UPDATE|DELETE)\b.*?(?:\+|%|\.format\(|f['\"])", re.IGNORECASE)),
+        r"(?:SELECT|INSERT\s+INTO|UPDATE|DELETE)\b[^\n]*?"
+        r"\b(?:FROM|WHERE|INTO|SET|VALUES)\b[^\n]*?"
+        r"(?:\+|%s|%\(|\.format\(|\{)", re.IGNORECASE)),
     ("verificação de certificado desabilitada", re.compile(r"verify\s*=\s*False")),
 )
 
@@ -104,6 +111,19 @@ TEST_LIMITATIONS = (
 )
 
 
+# O valor à direita de um `=` num padrão de credencial é o segredo. Devolvê-lo
+# no snippet o manda para o contexto do modelo e para qualquer log do cliente.
+# `file:line` já basta para o humano conferir — existe `read_file`.
+_SECRET_VALUE = re.compile(r"([=:]\s*['\"]?)[^\s'\"]{6,}")
+
+
+def _redact(label, line):
+    stripped = line.strip()
+    if "credencial" in label:
+        return _SECRET_VALUE.sub(r"\1***", stripped)
+    return stripped
+
+
 def _line_findings(project_root, patterns, claim_for, method):
     """Varre linha a linha aplicando pares (rótulo, regex).
 
@@ -132,7 +152,7 @@ def _line_findings(project_root, patterns, claim_for, method):
                             make_finding(
                                 claim_for(label, relative_file, line_number),
                                 method,
-                                [make_evidence(relative_file, line_number, line.strip())],
+                                [make_evidence(relative_file, line_number, _redact(label, line))],
                             )
                         )
 
@@ -203,7 +223,7 @@ def _handle_improvement_analyzer(project_root, arguments):
                     make_finding(
                         f"`{relative_file}` tem {len(lines)} linhas, acima do "
                         f"limiar declarado de {LONG_FILE_LINES}",
-                        "name-pattern",
+                        "line-count",
                         [make_evidence(relative_file, 1, lines[0].strip() if lines else None)],
                     )
                 )
@@ -219,13 +239,13 @@ def _handle_improvement_analyzer(project_root, arguments):
                             [make_evidence(relative_file, line_number, line.strip())],
                         )
                     )
-                elif len(line) > LONG_LINE_CHARS:
+                if len(line) > LONG_LINE_CHARS:
                     produced.append(
                         make_finding(
                             f"`{relative_file}` linha {line_number} tem "
                             f"{len(line)} caracteres, acima do limiar "
                             f"declarado de {LONG_LINE_CHARS}",
-                            "regex-heuristic",
+                            "line-count",
                             [make_evidence(relative_file, line_number, line.strip())],
                         )
                     )

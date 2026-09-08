@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 
 from .errors import ToolError
+from .analysis import _handle_security_analyzer
 from .exploration import _handle_list_files, _handle_project_info
 from .inference import _handle_data_flow_analyzer
 from .understanding import _handle_architecture_explainer, _handle_dependency_analyzer
@@ -56,7 +57,30 @@ def _sanitize(label):
     Um nome com `[`, `"` ou `-->` produziria um diagrama sintaticamente inválido
     — que o cliente renderiza como erro, ou pior, como outro grafo.
     """
-    return re.sub(r'[\[\]{}()"<>|]', "", label).replace("-->", "").strip() or "?"
+    label = re.sub(r"\s*[\r\n]+\s*", " ", str(label))
+    # `|` vira `/` em vez de desaparecer: apagá-lo reescrevia `^16.8 || ^17.0`
+    # como `^16.8  ^17.0`, mudando o sentido do range sem marca.
+    label = label.replace("|", "/")
+    label = re.sub(r'[\[\]{}()"<>]', "", label)
+    for link in ("-.->", "-->", "---", "==>"):
+        label = label.replace(link, " ")
+    return label.strip() or "?"
+
+
+def _cell(text):
+    """Escapa o que quebraria uma célula de tabela Markdown.
+
+    A assimetria era o bug: `_sanitize` protegia o Mermaid e nada protegia o
+    Markdown. Um `|` na claim — o operador OR do semver npm, `^16.8 || ^17.0` —
+    criava células extras, e o renderizador GFM DESCARTA as excedentes: a coluna
+    de evidência desaparecia e a claim ficava cortada. Uma claim renderizada sem
+    a evidência que a sustenta é exatamente o que este módulo existe para
+    impedir.
+
+    Newline é pior: racha a linha e o resto sai como parágrafo de corpo, sem
+    confiança, sem método, sem evidência.
+    """
+    return re.sub(r"\s*[\r\n]+\s*", " ", str(text)).replace("|", "\\|")
 
 
 def _node_id(index):
@@ -71,14 +95,19 @@ def _diagram_from_findings(findings, title):
     for index, finding in enumerate(findings[:MAX_DIAGRAM_NODES]):
         node = _node_id(index)
         label = _sanitize(finding["claim"])
-        arrow = EDGE_BY_CONFIDENCE[finding["confidence"]]
+        # `.get` com fallback tracejado: um nível novo na escada derrubaria as
+        # 4 tools de diagrama com KeyError -> -32603 genérico, o pior
+        # diagnóstico possível. Tracejado é o lado seguro.
+        arrow = EDGE_BY_CONFIDENCE.get(finding["confidence"], "-.->")
         lines.append(f'    {node}["{label}"]')
         lines.append(f'    root {arrow}|{finding["confidence"]}| {node}')
         nodes += 1
 
     if not nodes:
         lines.append('    empty["nenhuma evidência disponível"]')
-        lines.append("    root --> empty")
+        # Tracejada: sólida significa HIGH na legenda deste diagrama, e
+        # "nenhuma evidência" não é uma conclusão de alta confiança.
+        lines.append("    root -.-> empty")
 
     return "\n".join(lines), nodes
 
@@ -87,7 +116,7 @@ DIAGRAM_SOURCES = {
     "architecture": (_handle_architecture_explainer, "architecture_explainer"),
     "dependencies": (_handle_dependency_analyzer, "dependency_analyzer"),
     "call_graph": (_handle_data_flow_analyzer, "data_flow_analyzer"),
-    "security": (None, "security_analyzer"),
+    "security": (_handle_security_analyzer, "security_analyzer"),
 }
 
 
@@ -101,13 +130,6 @@ def _handle_generate_mermaid(project_root, arguments):
         )
 
     handler, source_name = DIAGRAM_SOURCES[diagram]
-    if handler is None:
-        # `security` é resolvida por import tardio para não criar dependência
-        # de `presentation` sobre `analysis` no topo do módulo.
-        from .analysis import _handle_security_analyzer
-
-        handler = _handle_security_analyzer
-
     source = handler(project_root, {})
     mermaid, nodes = _diagram_from_findings(source["findings"], diagram)
 
@@ -145,6 +167,9 @@ MERMAID_INPUT_SCHEMA = {
 }
 
 
+RENDERED_FINDINGS_LIMIT = 40
+
+
 def _render_findings_section(title, source):
     """Seção de Markdown com a confiança ao lado de CADA claim.
 
@@ -156,15 +181,33 @@ def _render_findings_section(title, source):
     if not source["findings"]:
         lines += ["Nenhuma evidência disponível para esta seção.", ""]
     else:
+        total = len(source["findings"])
+        shown = min(total, RENDERED_FINDINGS_LIMIT)
+        if shown < total:
+            # Corte silencioso lê como completo. É o precedente que este
+            # projeto estabeleceu em `SNIPPET_TRUNCATION_MARK`,
+            # `scan_truncated` e `files_skipped_by_cap` — o M5 era o único
+            # lugar que cortava sem marca.
+            lines += [
+                f"> Mostrando **{shown} de {total}** conclusões desta fonte. "
+                f"O restante foi omitido pelo limite de renderização.",
+                "",
+            ]
+        if source.get("findings_truncated"):
+            lines += [
+                "> A própria fonte truncou: há conclusões que ela não chegou a "
+                "produzir. Ver `files_skipped_by_cap` no retorno da tool.",
+                "",
+            ]
         lines += ["| Confiança | Método | Conclusão | Evidência |", "|---|---|---|---|"]
-        for finding in source["findings"][:40]:
+        for finding in source["findings"][:RENDERED_FINDINGS_LIMIT]:
             evidence = finding["evidence"][0]
             where = evidence["file"]
             if evidence["line"]:
                 where = f"{where}:{evidence['line']}"
             lines.append(
                 f"| `{finding['confidence']}` | `{finding['method']}` | "
-                f"{finding['claim']} | `{where}` |"
+                f"{_cell(finding['claim'])} | `{_cell(where)}` |"
             )
         lines.append("")
 
@@ -196,6 +239,9 @@ def _handle_generate_project_report(project_root, arguments):
         f"- arquivos ilegíveis pulados: {info['unreadable_entries_skipped']}",
         f"- varredura truncada: {'sim' if info['scan_truncated'] else 'não'}",
         "",
+        f"- inventário de `list_files`: **{len(listing['files'])}** arquivos "
+        f"após `.gitignore`" + (" (aplicado)" if listing["gitignore_applied"] else " (ausente)"),
+        "",
         "*Fonte: `project_info` e `list_files` — retrieval pura, sem inferência.*",
         "",
         "## Conclusões inferidas",
@@ -205,6 +251,7 @@ def _handle_generate_project_report(project_root, arguments):
     lines += _render_findings_section("Dependências", dependencies)
     lines += ["## Limitações gerais", ""]
     lines += [f"- {limitation}" for limitation in PRESENTATION_LIMITATIONS]
+    lines += [f"- {limitation}" for limitation in listing["scope_limitations"]]
 
     return {
         "markdown": "\n".join(lines),
@@ -214,7 +261,8 @@ def _handle_generate_project_report(project_root, arguments):
             "architecture_explainer",
             "dependency_analyzer",
         ],
-        "scope_limitations": list(PRESENTATION_LIMITATIONS),
+        "scope_limitations": list(PRESENTATION_LIMITATIONS)
+        + list(listing["scope_limitations"]),
     }
 
 
@@ -237,7 +285,9 @@ def _handle_generate_architecture_documentation(project_root, arguments):
     return {
         "markdown": "\n".join(lines),
         "derived_from": ["architecture_explainer", "dependency_analyzer"],
-        "scope_limitations": list(PRESENTATION_LIMITATIONS),
+        "scope_limitations": list(PRESENTATION_LIMITATIONS)
+        + list(architecture["scope_limitations"])
+        + list(dependencies["scope_limitations"]),
     }
 
 
@@ -265,7 +315,11 @@ def _handle_generate_project_summary(project_root, arguments):
     return {
         "markdown": "\n".join(lines),
         "derived_from": ["project_info", "architecture_explainer"],
-        "scope_limitations": list(PRESENTATION_LIMITATIONS),
+        # `PRESENTATION_LIMITATIONS` afirma que as limitações das fontes estão
+        # reproduzidas. Antes, o summary não reproduzia nenhuma — a frase era
+        # falsa no próprio payload que a carregava.
+        "scope_limitations": list(PRESENTATION_LIMITATIONS)
+        + list(architecture["scope_limitations"]),
     }
 
 

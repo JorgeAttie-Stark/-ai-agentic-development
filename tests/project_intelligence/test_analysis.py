@@ -224,3 +224,81 @@ class TestAnalyzerIsStaticTests(unittest.TestCase):
             self.assertEqual(result["test_files_found"], 0)
             self.assertEqual(result["findings"], [])
             self.assertTrue(result["scope_limitations"])
+
+
+class FinalAuditRegressionTests(unittest.TestCase):
+    """Regressões da auditoria final."""
+
+    def _labels(self, line):
+        return [label for label, matcher in analysis.SECURITY_PATTERNS if matcher.search(line)]
+
+    def test_sql_pattern_requires_actual_sql_neighbourhood(self):
+        """BLOQUEANTE 4: `def update(self, d): return self.total + 1` casava.
+
+        A claim afirmava "consulta SQL" onde não havia SQL nenhum. `LOW` cobre
+        incerteza sobre risco; não cobre descrever errado o que foi visto.
+        """
+        for benign in (
+            "def update(self, data): return self.total + 1",
+            'requests.delete(url + "/items")',
+            "# Update: crescimento de 5% no trimestre",
+            'cache.delete(f"user:{uid}")',
+        ):
+            with self.subTest(line=benign):
+                self.assertNotIn("consulta SQL", " ".join(self._labels(benign)))
+
+    def test_sql_pattern_still_catches_real_concatenation(self):
+        self.assertIn(
+            "concatenação em consulta SQL",
+            self._labels('cursor.execute("SELECT * FROM users WHERE id=" + uid)'),
+        )
+
+    def test_credential_pattern_catches_prefixed_names(self):
+        """IMPORTANTE 5: o `\\b` encostava em `_` e perdia 5 de 6 grafias."""
+        for line in (
+            'access_token = "ghp_abcdefghij"',
+            'client_secret = "s3cr3t-value"',
+            'db_password = "hunter2hunter2"',
+            "DATABASE_PASSWORD=supersecret123",
+        ):
+            with self.subTest(line=line):
+                self.assertIn("possível credencial literal no código", self._labels(line))
+
+    def test_os_popen_is_detected(self):
+        self.assertIn("execução de comando de sistema", self._labels('os.popen("ls " + d)'))
+
+    def test_secret_value_is_redacted_in_the_evidence(self):
+        """IMPORTANTE 6: o snippet devolvia o segredo para o contexto do modelo."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cfg.py").write_text('api_key = "sk-live-REAL-SECRET-VALUE"\n')
+
+            result = _security(root)
+            snippet = result["findings"][0]["evidence"][0]["snippet"]
+
+            self.assertNotIn("REAL-SECRET", snippet)
+            self.assertIn("api_key", snippet)
+
+    def test_long_line_with_a_marker_reports_both_metrics(self):
+        """IMPORTANTE 7: o `elif` descartava a métrica de linha longa."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("# TODO " + "x" * 200 + "\n")
+
+            claims = " ".join(f["claim"] for f in _improvement(root)["findings"])
+
+            self.assertIn("TODO", claims)
+            self.assertIn("caracteres", claims)
+
+    def test_line_counting_is_reported_as_a_measurement_not_a_pattern(self):
+        """IMPORTANTE 8: contagem exata vinha rotulada como `name-pattern`."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "big.py").write_text("x = 1\n" * 500)
+
+            with patch.object(analysis, "LONG_FILE_LINES", 100):
+                result = _improvement(root)
+            long_file = [f for f in result["findings"] if "linhas" in f["claim"]][0]
+
+            self.assertEqual(long_file["method"], "line-count")
+            self.assertEqual(long_file["confidence"], "HIGH")

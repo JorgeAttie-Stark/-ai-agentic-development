@@ -46,6 +46,10 @@ CONFIDENCE_BY_METHOD = {
     # A evidência É o fato: parsing de formato bem definido.
     "manifest-read": "HIGH",
     "ast-parse": "HIGH",
+    # Contagem determinística: linhas, caracteres, arquivos. A evidência É o
+    # fato, igual a parsing. Existe separado porque rotular medição como
+    # `name-pattern` deixava o handler escolher a confiança por via indireta.
+    "line-count": "HIGH",
     # Convenção forte e comum, não verificada semanticamente. Um diretório
     # chamado `handlers/` sugere um padrão; não prova direção de dependência.
     "name-pattern": "MEDIUM",
