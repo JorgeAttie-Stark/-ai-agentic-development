@@ -154,3 +154,27 @@ class EvidenceInvariantRegressionTests(unittest.TestCase):
 
         with self.assertRaises(ToolError):
             validate_finding(forged)
+
+
+class UnknownFieldRegressionTests(unittest.TestCase):
+    """IMPORTANTE 4: a impossibilidade estrutural era teste, não código.
+
+    `validate_finding` checava chave FALTANDO, nunca chave SOBRANDO. Uma tool
+    futura acrescentava `interpretation` e passava — e a garantia de que
+    `business_rules_analyzer` não descreve a regra voltava a depender de um
+    teste que só cobria aquela tool.
+    """
+
+    def test_finding_with_unknown_field_is_rejected(self):
+        finding = make_finding("c", "ast-parse", [make_evidence("a.py")])
+        finding["interpretation"] = "valores acima do limite são rejeitados"
+
+        with self.assertRaises(ToolError):
+            validate_finding(finding)
+
+    def test_evidence_item_with_unknown_field_is_rejected(self):
+        finding = make_finding("c", "ast-parse", [make_evidence("a.py")])
+        finding["evidence"][0]["rule"] = "descrição enfiada aqui"
+
+        with self.assertRaises(ToolError):
+            validate_finding(finding)

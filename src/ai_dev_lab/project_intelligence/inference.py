@@ -29,7 +29,6 @@ regra, precisa primeiro inventar um campo — e é aí que a revisão pega.
 from __future__ import annotations
 
 import ast
-import os
 import re
 from pathlib import Path
 
@@ -48,31 +47,11 @@ CALL_GRAPH_LIMITATIONS = (
     "uma aresta prova que existe uma chamada com aquele NOME naquela linha; "
     "não prova a qual função ela resolve — o nome pode estar sombreado, "
     "importado, ser método de qualquer objeto, ou reatribuído em runtime",
+    "a origem da aresta é o escopo LEXICAL onde a chamada aparece. Chamada dentro de lambda ou comprehension sai com origem anônima, porque quem a invoca é outro alguém — talvez nunca",
     "chamada dinâmica (`getattr`, `eval`, despacho por dict) é invisível",
-    "o teto de findings corta em fronteira de ARQUIVO, então um único arquivo grande é devolvido inteiro e o teto vira piso mole — corte no meio produziria visão parcial de arquivo sem avisar, que é pior",
+    "quando o teto corta, os arquivos são visitados em ordem alfabética de caminho — a seleção é determinística e reprodutível, mas não prioriza relevância: num repositório grande, `tests/` pode consumir o orçamento antes de `src/`",
+    "o teto de findings pula o ARQUIVO inteiro e o nomeia em `files_skipped_by_cap`: nunca devolve visão parcial de um arquivo, e nunca estoura o teto. Um repositório grande recebe um subconjunto de arquivos, explicitamente listado",
 )
-
-
-def _enclosing_scope_name(tree):
-    """Mapeia cada linha ao nome da função que a contém, quando há uma.
-
-    Sem isso a aresta perderia a origem: `helper()` na linha 12 é chamado *de
-    algum lugar*, e o lugar é o que torna a aresta útil.
-    """
-    scope_by_line = {}
-
-    def _walk(node, current):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                name = child.name
-                for line in range(child.lineno, getattr(child, "end_lineno", child.lineno) + 1):
-                    scope_by_line[line] = name
-                _walk(child, name)
-            else:
-                _walk(child, current)
-
-    _walk(tree, None)
-    return scope_by_line
 
 
 def _called_name(node):
@@ -90,23 +69,84 @@ def _called_name(node):
     return None
 
 
+def _call_line(node):
+    """Linha do NOME chamado, não do início da expressão.
+
+    `ast.Call.lineno` aponta o começo da expressão de chamada. Em cadeia
+    quebrada em linhas — `client\n.session\n.post(url)` — isso faz a evidência
+    apontar para uma linha que não contém o nome que a claim afirma, e quem
+    fosse conferir não confirmaria.
+    """
+    return getattr(node.func, "end_lineno", None) or node.lineno
+
+
+# Escopos que Python cria e que NÃO são a função contenedora. Uma chamada
+# dentro de um deles não é feita pela função que o contém lexicalmente: a
+# lambda é invocada por outro alguém, talvez nunca; a comprehension tem escopo
+# próprio. Atribuir a chamada à função de fora produziria aresta falsa.
+_NESTED_SCOPES = (ast.Lambda, ast.GeneratorExp, ast.ListComp, ast.SetComp, ast.DictComp)
+
+
+def _walk_calls(node, scope, out):
+    """Coleta chamadas carregando o escopo pela ÁRVORE, não por faixa de linhas.
+
+    Faixa de linhas não é escopo, e a diferença não é acadêmica:
+
+    - `def charge(gateway=build_live_gateway())` — o default é avaliado uma vez,
+      na definição, no escopo de FORA. `charge` nunca chama `build_live_gateway`.
+      Por faixa de linhas a chamada caía dentro de `charge`, porque `lineno` do
+      `def` abre a faixa.
+    - `button.on_click(lambda: transfer_funds(x))` — quem chama `transfer_funds`
+      é a lambda. Por faixa de linhas a aresta saía como se a função
+      registradora chamasse, com confiança HIGH.
+
+    O despacho é sobre o próprio nó, não sobre os filhos: `args` e
+    `decorator_list` precisam ser visitados com o escopo de fora, e o `body`
+    com o escopo de dentro — o que só é possível decidindo ao entrar no nó.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        # Assinatura e decoradores rodam no escopo de fora, não no da função.
+        for outer in node.decorator_list:
+            _walk_calls(outer, scope, out)
+        if not isinstance(node, ast.ClassDef):
+            _walk_calls(node.args, scope, out)
+
+        # Qualifica: `Alpha.process` e `Beta.process` são nós distintos do
+        # grafo, não um nó fundido chamado `process`.
+        inner = f"{scope}.{node.name}" if scope else node.name
+        for stmt in node.body:
+            _walk_calls(stmt, inner, out)
+        return
+
+    if isinstance(node, _NESTED_SCOPES):
+        # Quem invoca a lambda ou consome o gerador é outro alguém, talvez
+        # nunca. Atribuir à função contenedora produziria aresta falsa.
+        for child in ast.iter_child_nodes(node):
+            _walk_calls(child, None, out)
+        return
+
+    if isinstance(node, ast.Call):
+        out.append((node, scope))
+
+    for child in ast.iter_child_nodes(node):
+        _walk_calls(child, scope, out)
+
+
 def _call_edges(text, relative_file):
     tree = ast.parse(text)
-    scope_by_line = _enclosing_scope_name(tree)
     lines = text.splitlines()
+    collected = []
+    _walk_calls(tree, None, collected)
+
     findings = []
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-
+    for node, scope in collected:
         target = _called_name(node)
         if target is None:
             continue
 
-        caller = scope_by_line.get(node.lineno)
-        origin = f"`{caller}`" if caller else "o corpo do módulo"
-        snippet = lines[node.lineno - 1].strip() if node.lineno <= len(lines) else None
+        line = _call_line(node)
+        origin = f"`{scope}`" if scope else "um escopo anônimo ou o corpo do módulo"
+        snippet = lines[line - 1].strip() if line <= len(lines) else None
 
         findings.append(
             make_finding(
@@ -114,7 +154,7 @@ def _call_edges(text, relative_file):
                 # `x` definida em ...". O `ast` não prova a resolução.
                 f"em `{relative_file}`, {origin} chama `{target}`",
                 "ast-parse",
-                [make_evidence(relative_file, node.lineno, snippet)],
+                [make_evidence(relative_file, line, snippet)],
             )
         )
 
@@ -127,17 +167,14 @@ def _handle_data_flow_analyzer(project_root, arguments):
     findings = []
     python_files_analyzed = 0
     files_unparseable = 0
-    files_skipped_by_cap = 0
+    # Lista, não contagem: o consumidor precisa saber QUAIS arquivos ficaram
+    # fora, senão não tem como perceber que `src/` inteiro foi omitido.
+    files_skipped_by_cap = []
     findings_truncated = False
 
     try:
         for file_path, relative_file in _iter_project_files(project_root, counters):
             if Path(relative_file).suffix != ".py":
-                continue
-
-            if len(findings) >= MAX_FINDINGS:
-                findings_truncated = True
-                files_skipped_by_cap += 1
                 continue
 
             text = _read_text(file_path)
@@ -146,11 +183,21 @@ def _handle_data_flow_analyzer(project_root, arguments):
                 continue
 
             try:
-                findings.extend(_call_edges(text, relative_file))
+                produced = _call_edges(text, relative_file)
             except (SyntaxError, ValueError, RecursionError, MemoryError):
                 files_unparseable += 1
                 continue
 
+            # O teto é um teto, não um piso mole. A alternativa honesta ao
+            # corte no meio do arquivo não é deixar estourar — é pular o
+            # arquivo inteiro e nomeá-lo, que é o que já se fazia para os
+            # arquivos depois do limite.
+            if len(findings) + len(produced) > MAX_FINDINGS:
+                findings_truncated = True
+                files_skipped_by_cap.append(relative_file)
+                continue
+
+            findings.extend(produced)
             python_files_analyzed += 1
     except OSError as error:
         raise ToolError("não foi possível varrer o diretório do projeto") from error
@@ -173,7 +220,7 @@ DATA_FLOW_OUTPUT_SCHEMA = findings_output_schema(
     {
         "python_files_analyzed": {"type": "integer"},
         "files_unparseable": {"type": "integer"},
-        "files_skipped_by_cap": {"type": "integer"},
+        "files_skipped_by_cap": {"type": "array", "items": {"type": "string"}},
         "findings_truncated": {"type": "boolean"},
         "unreadable_entries_skipped": {"type": "integer"},
     }
@@ -187,6 +234,8 @@ BUSINESS_RULES_LIMITATIONS = (
     "não um passo intermediário para uma síntese que a tool não faz",
     "heurística de texto sobre condicional e validação próximas de vocabulário "
     "de domínio: confiança LOW e falso positivo esperado, não anomalia",
+    "o vocabulário de domínio é uma lista fixa em português e inglês: identificador em outro idioma natural (alemão, japonês) é invisível, e nesse caso `findings` vazio NÃO significa ausência de regra",
+    "heurística de texto: não distingue código de comentário nem de string literal — é a causa dominante de falso positivo na prática",
     "regra implícita, distribuída por vários arquivos ou expressa sem "
     "condicional é invisível — ausência de candidato não significa ausência "
     "de regra",
@@ -226,23 +275,24 @@ def _handle_business_rules_analyzer(project_root, arguments):
     counters = {"unreadable_entries_skipped": 0}
     findings = []
     files_scanned = 0
-    files_skipped_by_cap = 0
+    files_skipped_by_cap = []
     findings_truncated = False
 
     try:
         for file_path, relative_file in _iter_project_files(project_root, counters):
-            if len(findings) >= MAX_FINDINGS:
-                findings_truncated = True
-                files_skipped_by_cap += 1
-                continue
-
             text = _read_text(file_path)
             if text is None:
                 counters["unreadable_entries_skipped"] += 1
                 continue
 
+            candidates = list(_rule_candidate_lines(text))
+            if len(findings) + len(candidates) > MAX_FINDINGS:
+                findings_truncated = True
+                files_skipped_by_cap.append(relative_file)
+                continue
+
             files_scanned += 1
-            for line_number, snippet in _rule_candidate_lines(text):
+            for line_number, snippet in candidates:
                 findings.append(
                     make_finding(
                         # A claim aponta. Ela não pode reproduzir o conteúdo da
@@ -273,7 +323,7 @@ def _handle_business_rules_analyzer(project_root, arguments):
 BUSINESS_RULES_OUTPUT_SCHEMA = findings_output_schema(
     {
         "files_scanned": {"type": "integer"},
-        "files_skipped_by_cap": {"type": "integer"},
+        "files_skipped_by_cap": {"type": "array", "items": {"type": "string"}},
         "findings_truncated": {"type": "boolean"},
         "unreadable_entries_skipped": {"type": "integer"},
     }

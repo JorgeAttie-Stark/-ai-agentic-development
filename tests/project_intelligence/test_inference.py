@@ -102,12 +102,13 @@ class CallGraphHonestyTests(unittest.TestCase):
 
             self.assertEqual(files, {"own.py"})
 
-    def test_truncation_is_flagged_when_a_file_is_skipped_by_the_cap(self):
-        """O corte é em fronteira de arquivo, então a flag exige >= 2 arquivos.
+    def test_cap_skips_whole_files_and_names_them(self):
+        """O teto é teto: pula o arquivo inteiro e diz qual.
 
-        Com um arquivo só, ele termina inteiro e nada foi omitido — `False` é a
-        resposta correta, não uma falha. Ver a limitação de arquivo único
-        registrada em `CALL_GRAPH_LIMITATIONS`.
+        A alternativa ao corte no meio do arquivo não é deixar estourar — é
+        pular e nomear. Contagem não bastaria: o consumidor precisa saber
+        QUAIS arquivos ficaram fora, senão não percebe que uma pasta inteira
+        foi omitida.
         """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -115,24 +116,49 @@ class CallGraphHonestyTests(unittest.TestCase):
             for index in range(3):
                 (root / f"m{index}.py").write_text(f"def caller():\n{body}")
 
-            with patch.object(inference, "MAX_FINDINGS", 5):
+            with patch.object(inference, "MAX_FINDINGS", 15):
                 result = _call_call_graph(root)
 
             self.assertTrue(result["findings_truncated"])
-            self.assertGreater(result["files_skipped_by_cap"], 0)
+            self.assertTrue(result["files_skipped_by_cap"])
+            self.assertTrue(
+                all(name.endswith(".py") for name in result["files_skipped_by_cap"])
+            )
 
-    def test_single_large_file_is_never_cut_mid_file(self):
-        """Consequência aceita: `MAX_FINDINGS` é piso mole, não teto duro."""
+    def test_cap_is_never_exceeded(self):
+        """Regressão: o teto era piso mole e um repo comum o estourava.
+
+        Medido antes da correção: 528 findings com MAX_FINDINGS=300, o grafo
+        de 3 arquivos de teste, e zero findings sobre `src/`.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            body = "".join(f"    f{n}()\n" for n in range(30))
-            (root / "only.py").write_text(f"def caller():\n{body}")
+            body = "".join(f"    f{n}()\n" for n in range(20))
+            for index in range(5):
+                (root / f"m{index}.py").write_text(f"def caller():\n{body}")
 
-            with patch.object(inference, "MAX_FINDINGS", 5):
+            with patch.object(inference, "MAX_FINDINGS", 25):
                 result = _call_call_graph(root)
 
-            self.assertEqual(len(result["findings"]), 30)
-            self.assertFalse(result["findings_truncated"])
+            self.assertLessEqual(len(result["findings"]), 25)
+            self.assertTrue(result["findings_truncated"])
+
+    def test_file_is_never_returned_partially(self):
+        """Nenhum arquivo aparece com parte dos seus findings."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "".join(f"    f{n}()\n" for n in range(10))
+            for index in range(4):
+                (root / f"m{index}.py").write_text(f"def caller():\n{body}")
+
+            with patch.object(inference, "MAX_FINDINGS", 25):
+                result = _call_call_graph(root)
+
+            per_file = {}
+            for finding in result["findings"]:
+                name = finding["evidence"][0]["file"]
+                per_file[name] = per_file.get(name, 0) + 1
+            self.assertTrue(all(count == 10 for count in per_file.values()))
 
 
 class BusinessRulesStructuralImpossibilityTests(unittest.TestCase):
@@ -251,3 +277,125 @@ class BusinessRulesStructuralImpossibilityTests(unittest.TestCase):
             result = _call_business_rules(root)
 
             self.assertEqual(result["findings"], [])
+
+
+class ReviewRegressionTests(unittest.TestCase):
+    """Regressões dos achados do reviewer no Milestone 3.
+
+    Nenhum destes casos falhava na suíte anterior. Os três BLOQUEANTE eram o
+    `ast` sendo lido por posição de linha em vez de por árvore, e uma corrupção
+    silenciosa da citação.
+    """
+
+    def test_call_inside_lambda_is_not_attributed_to_the_enclosing_function(self):
+        """BLOQUEANTE 1: quem chama é a lambda, invocada por outro alguém."""
+        edges = inference._call_edges(
+            "def register():\n    button.on_click(lambda: transfer_funds(x))\n", "r.py"
+        )
+        transfer = [e for e in edges if "transfer_funds" in e["claim"]]
+
+        self.assertNotIn("`register`", transfer[0]["claim"])
+        self.assertIn("anônimo", transfer[0]["claim"])
+
+    def test_default_argument_call_is_not_attributed_to_the_function(self):
+        """BLOQUEANTE 1: o default roda na definição, no escopo de FORA.
+
+        `charge` nunca chama `build_gateway`. A aresta antiga era simplesmente
+        falsa, e vinha com HIGH.
+        """
+        edges = inference._call_edges(
+            "def charge(gateway=build_gateway()):\n    pass\n", "r.py"
+        )
+
+        self.assertTrue(edges)
+        self.assertNotIn("`charge`", edges[0]["claim"])
+
+    def test_methods_of_different_classes_are_distinct_graph_nodes(self):
+        """IMPORTANTE 8: `process` e `process` fundiam num nó só."""
+        edges = inference._call_edges(
+            "class Alpha:\n"
+            "    def process(self):\n"
+            "        alpha_only()\n"
+            "\n"
+            "class Beta:\n"
+            "    def process(self):\n"
+            "        beta_only()\n",
+            "r.py",
+        )
+        origins = {e["claim"].split("`")[3] for e in edges}
+
+        self.assertEqual(origins, {"Alpha.process", "Beta.process"})
+
+    def test_evidence_line_shows_the_called_name_in_a_multiline_chain(self):
+        """BLOQUEANTE 2: a evidência apontava a linha do início da expressão.
+
+        A limitação nº 3 promete que a aresta prova uma chamada com aquele nome
+        NAQUELA linha — era falso para cadeia quebrada em linhas.
+        """
+        source = "def multiline():\n    result = (\n        client\n        .session\n        .post(url)\n    )\n"
+        edges = inference._call_edges(source, "c.py")
+        post = [e for e in edges if "`post`" in e["claim"]]
+        line = post[0]["evidence"][0]["line"]
+
+        self.assertIn("post", source.splitlines()[line - 1])
+
+    def test_domain_signal_alone_is_not_a_candidate(self):
+        """IMPORTANTE 6: nada travava a conjunção, o mecanismo de precisão.
+
+        Trocar o `and` por `or` faria a tool virar gerador de ruído — todo `if`
+        do projeto — e a suíte anterior continuaria verde.
+        """
+        self.assertEqual(list(inference._rule_candidate_lines("total = amount * 2\n")), [])
+
+    def test_decision_signal_alone_is_not_a_candidate(self):
+        self.assertEqual(
+            list(inference._rule_candidate_lines("if not path:\n    raise ValueError(1)\n")),
+            [],
+        )
+
+    def test_both_signals_together_are_a_candidate(self):
+        candidates = list(inference._rule_candidate_lines("if valor > limite:\n"))
+
+        self.assertEqual(len(candidates), 1)
+
+    def test_long_snippet_is_marked_as_truncated(self):
+        """BLOQUEANTE 3: cortava no meio da condição, sem marca.
+
+        Perder um `and` ou uma negação entrega uma condição que se lê como
+        completa e significa o oposto — na tool cujo produto É o snippet.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            long_line = "if saldo > limite " + "and outra_condicao " * 20 + ": aprovar()\n"
+            (root / "b.py").write_text(long_line)
+
+            result = _call_business_rules(root)
+            snippet = result["findings"][0]["evidence"][0]["snippet"]
+
+            self.assertIn("truncado", snippet)
+
+    def test_short_snippet_is_the_verbatim_line_without_marker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "b.py").write_text("if valor > limite:\n")
+
+            result = _call_business_rules(root)
+            snippet = result["findings"][0]["evidence"][0]["snippet"]
+
+            self.assertEqual(snippet, "if valor > limite:")
+            self.assertNotIn("truncado", snippet)
+
+    def test_scope_limitations_declare_the_natural_language_bias(self):
+        """IMPORTANTE 5: o vocabulário é PT/EN, não agnóstico de idioma."""
+        with tempfile.TemporaryDirectory() as tmp:
+            result = _call_business_rules(tmp)
+
+        joined = " ".join(result["scope_limitations"]).lower()
+        self.assertIn("idioma", joined)
+        self.assertIn("comentário", joined)
+
+    def test_identifiers_in_another_natural_language_yield_nothing(self):
+        """Prova a limitação declarada acima, em vez de só afirmá-la em texto."""
+        self.assertEqual(
+            list(inference._rule_candidate_lines("if betrag > kreditgrenze:\n")), []
+        )

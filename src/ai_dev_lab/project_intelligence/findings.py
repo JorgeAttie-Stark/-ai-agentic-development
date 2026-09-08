@@ -19,8 +19,10 @@ Quatro invariantes, todas impostas por código e não por convenção:
    `_validate_evidence_item`, que os dois caminhos atravessam. Sem isso,
    `make_evidence` não era chokepoint e a garantia voltava a ser convenção.
 4. **`validate_finding` é chamada em produção**, no ponto de saída de cada
-   tool interpretativa — não é utilitário de teste. É o que fecha o caminho de
-   quem montar o dict à mão numa tool futura.
+   tool interpretativa — não é utilitário de teste. Ela recusa campo
+   desconhecido, e é isso que torna estrutural a proibição de descrever a
+   regra: uma tool futura não consegue acrescentar `interpretation` ou
+   `description` a um finding.
 """
 from __future__ import annotations
 
@@ -30,6 +32,12 @@ from pathlib import Path
 from .errors import ToolError
 
 MAX_SNIPPET_LENGTH = 200
+# Marca explícita de corte. Sem ela, uma condição cortada no meio se lê como
+# completa e pode significar o oposto: perder um `and`, uma negação ou um
+# segundo limite muda o sentido sem nenhum sinal. O `business_rules_analyzer`
+# declara devolver "o trecho literal" — para linha longa, isso só é verdade
+# com a marca.
+SNIPPET_TRUNCATION_MARK = " …[truncado]"
 
 # A escada. `confidence` não é julgamento: é uma função do método que produziu
 # a conclusão. Um método novo exige uma linha aqui, o que força a decisão de
@@ -56,9 +64,14 @@ def _validate_evidence_item(item):
     if not isinstance(item, dict):
         raise ToolError("cada item de evidência deve ser um dict")
 
-    missing = {"file", "line", "snippet"} - set(item)
+    expected = {"file", "line", "snippet"}
+    missing = expected - set(item)
     if missing:
         raise ToolError(f"item de evidência incompleto, faltam: {sorted(missing)}")
+
+    unknown = set(item) - expected
+    if unknown:
+        raise ToolError(f"item de evidência com campo desconhecido: {sorted(unknown)}")
 
     file = item["file"]
     if not isinstance(file, str) or not file:
@@ -76,8 +89,8 @@ def make_evidence(file, line=None, snippet=None):
     no construtor, e não em cada tool — vazamento de estrutura de máquina é
     fácil de introduzir por descuido e caro de auditar depois.
     """
-    if snippet is not None:
-        snippet = snippet[:MAX_SNIPPET_LENGTH]
+    if snippet is not None and len(snippet) > MAX_SNIPPET_LENGTH:
+        snippet = snippet[:MAX_SNIPPET_LENGTH] + SNIPPET_TRUNCATION_MARK
 
     item = {"file": file, "line": line, "snippet": snippet}
     _validate_evidence_item(item)
@@ -118,9 +131,19 @@ def validate_finding(finding):
     `confidence: HIGH` e `method: regex-heuristic` é sintaticamente possível.
     Esta função é o ponto onde essa inflação é pega.
     """
-    missing = {"claim", "confidence", "method", "evidence"} - set(finding)
+    expected = {"claim", "confidence", "method", "evidence"}
+    missing = expected - set(finding)
     if missing:
         raise ToolError(f"finding incompleto, faltam: {sorted(missing)}")
+
+    # Recusar chave DESCONHECIDA é o que torna a impossibilidade estrutural
+    # real. Sem isto, uma tool futura acrescenta `interpretation` ou
+    # `description` e passa — e a garantia de que `business_rules_analyzer`
+    # não descreve a regra volta a depender de um teste que só cobre aquela
+    # tool específica.
+    unknown = set(finding) - expected
+    if unknown:
+        raise ToolError(f"finding com campo desconhecido: {sorted(unknown)}")
 
     method = finding["method"]
     if method not in CONFIDENCE_BY_METHOD:
