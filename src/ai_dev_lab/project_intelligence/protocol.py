@@ -12,7 +12,7 @@ import json
 import logging
 
 from .errors import ToolError
-from .exploration import TOOL_REGISTRY
+from .registry import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
 

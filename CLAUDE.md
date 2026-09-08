@@ -36,6 +36,8 @@ Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
 para um `projectRoot` resolvido de `--root`, com o `cwd` do processo como
 fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools:
 
+**Camada Exploração** — retrieval pura, sem envelope:
+
 | Tool | O que faz |
 |---|---|
 | `project_info` | contagem por extensão, total de arquivos e linhas, manifestos na raiz |
@@ -43,6 +45,30 @@ fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools
 | `read_file` | conteúdo de um arquivo de texto, confinado à raiz via `paths.resolve_within` |
 | `search_code` | regex nos arquivos de texto; devolve arquivo, linha e o trecho que casou |
 | `project_profile` | visão consolidada, derivada de `project_info` + `list_files` |
+
+**Camada Entendimento** — as primeiras que *afirmam* algo:
+
+| Tool | Método | `confidence` |
+|---|---|---|
+| `project_map` | árvore de diretórios — factual, **sem** findings | — |
+| `architecture_explainer` | `name-pattern` | `MEDIUM`, capado |
+| `code_structure_analyzer` | `ast-parse` (Python) / `regex-heuristic` (resto) | `HIGH` / `LOW` |
+| `dependency_analyzer` | `manifest-read` / `regex-heuristic` (TOML) | `HIGH` / `LOW` |
+
+### O envelope de evidência
+
+`findings.py` impõe por código, não por convenção:
+
+- **Nenhuma claim sem evidência** — `make_finding` recusa lista vazia
+- **`confidence` é derivada do `method`, nunca escolhida** — não existe parâmetro
+  de confiança na API. A única forma de emitir `HIGH` é usar um método que
+  parseia formato bem definido
+- **`validate_finding` pega dict forjado à mão** com confiança inflada
+- **Evidência recusa path absoluto** no construtor, não em cada tool
+
+Onde não há evidência, a tool reporta **ausência**, não palpite. Lista de
+findings vazia com limitação declarada é resposta melhor que inferência fraca
+apresentada como descoberta.
 
 As três são retrieval pura — devolvem fato observado, sem envelope de
 `findings`/`confidence`. Esse envelope começa no Milestone 2, com as tools de
