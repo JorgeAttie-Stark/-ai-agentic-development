@@ -33,9 +33,18 @@ O pacote importável é `ai_dev_lab`, dentro de `src/`.
 ### `project_intelligence/` — servidor MCP
 
 Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
-para um `projectRoot` — por padrão o `cwd` do processo, com `--root` como
-override opcional. Hoje expõe `initialize`, `tools/list` e `tools/call` para
-duas tools: `project_info` e `list_files`.
+para um `projectRoot` resolvido de `--root`, com o `cwd` do processo como
+fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools:
+
+| Tool | O que faz |
+|---|---|
+| `project_info` | contagem por extensão, total de arquivos e linhas, manifestos na raiz |
+| `list_files` | inventário de arquivos, ignorando `.git/` e o `.gitignore` de topo |
+| `read_file` | conteúdo de um arquivo de texto, confinado à raiz via `paths.resolve_within` |
+
+As três são retrieval pura — devolvem fato observado, sem envelope de
+`findings`/`confidence`. Esse envelope começa no Milestone 2, com as tools de
+inferência.
 
 Rodar o servidor apontado para um projeto alvo:
 

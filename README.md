@@ -196,8 +196,9 @@ An MCP server that helps Claude understand **any** software project: read it, ma
 it, explain it, analyse it, document it. Language-agnostic on purpose — it points
 at an arbitrary repository, not at this one.
 
-Milestone 0 shipped: JSON-RPC 2.0 over stdio, `initialize` / `tools/list` /
-`tools/call`, and one tool — `project_info`. Python 3.9, stdlib only.
+Milestones 0 and 1 shipped: JSON-RPC 2.0 over stdio, `initialize` /
+`tools/list` / `tools/call`, and three tools — `project_info`, `list_files` and
+`read_file`. Python 3.9, stdlib only.
 
 The design constraint that shapes everything: **no conclusion without evidence.**
 Any inferred claim carries the file, the line, the snippet, and a confidence level
@@ -250,9 +251,8 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 Expected output:
 
 ```
-......
 ----------------------------------------------------------------------
-Ran 6 tests in 0.000s
+Ran 89 tests in 0.117s
 
 OK
 ```
@@ -266,11 +266,24 @@ OK
 ## 🔌 Project Intelligence MCP
 
 An MCP server over stdio (JSON-RPC 2.0, one request per line) that points at an
-arbitrary `projectRoot` — not necessarily this repository. Milestone 0 proved
-the end-to-end wiring with `project_info` (file/line counts and known
-manifests at the target root). Milestone 1 adds `list_files` (file inventory
-at the target root, `.git/` always ignored, best-effort top-level
-`.gitignore`).
+arbitrary `projectRoot` — not necessarily this repository.
+
+| Tool | What it returns |
+|---|---|
+| `project_info` | counts by extension, total files and lines, known manifests at the root |
+| `list_files` | file inventory, `.git/` always ignored, best-effort top-level `.gitignore` |
+| `read_file` | text content of one file, confined to the root, size-capped |
+
+All three are **pure retrieval** — they return observed fact, with no
+`findings`/`confidence` envelope. That envelope starts in Milestone 2, with the
+inference tools.
+
+`read_file` is the first tool to open a file whose path comes from the client,
+so it carries the project's security surface: absolute paths and symlinks
+escaping the root are rejected, `O_NOFOLLOW` closes the TOCTOU window left after
+resolution, non-regular files (a FIFO would hang the single-threaded loop) are
+refused before any `open()`, and **no error message ever contains an absolute
+path** — 13 distinct error paths, each with its own constant message.
 
 Run it directly, pointed at a target project:
 
