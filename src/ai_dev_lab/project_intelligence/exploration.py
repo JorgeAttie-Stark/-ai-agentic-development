@@ -9,10 +9,16 @@ import os
 from pathlib import Path
 
 from .errors import ToolError
+from .paths import resolve_within
 
 MAX_FILES_SCANNED = 20_000
 MAX_FILE_SIZE_FOR_LINE_COUNT = 5 * 1024 * 1024
 BINARY_SNIFF_BYTES = 8192
+
+# Teto de UMA resposta `read_file` serializada numa linha stdio — orçamento
+# diferente de `MAX_FILE_SIZE_FOR_LINE_COUNT`, que é "quanto ler para contar
+# linhas ao varrer 20.000 arquivos". Valor de julgamento, não medição.
+MAX_FILE_SIZE_FOR_READ = 1024 * 1024
 
 KNOWN_MANIFESTS = (
     "package.json",
@@ -299,6 +305,75 @@ LIST_FILES_OUTPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
+def _handle_read_file(project_root, arguments):
+    relative_path = arguments.get("relative_path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise ToolError("relative_path é obrigatório e deve ser uma string não vazia")
+
+    resolved = resolve_within(project_root, relative_path)
+
+    if not os.path.exists(resolved):
+        raise ToolError("arquivo não encontrado")
+    elif os.path.isdir(resolved):
+        raise ToolError("caminho é um diretório")
+    elif not os.path.isfile(resolved):
+        raise ToolError("não é um arquivo regular")
+
+    # TOCTOU, camada 2: `resolved` já veio resolvido de `resolve_within`
+    # (camada 1), mas a janela entre aquele `.resolve()` e este `open()`
+    # continua existindo. `O_NOFOLLOW` fecha só o componente final — não
+    # protege componentes intermediários trocados no meio do caminho.
+    try:
+        fd = os.open(str(resolved), os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as handle:
+            raw = handle.read(MAX_FILE_SIZE_FOR_READ + 1)
+    except PermissionError:
+        raise ToolError("sem permissão de leitura") from None
+    except OSError:
+        raise ToolError("não foi possível abrir o arquivo") from None
+
+    # Sniff sempre, antes de decidir truncar: um binário maior que o teto
+    # precisa reportar "binário", não "truncado". Aplicado aos bytes já
+    # lidos pelo fd — nunca reabrindo por path (`_is_binary`), o que
+    # reintroduziria a janela TOCTOU que a camada 2 acabou de fechar.
+    if b"\x00" in raw[:BINARY_SNIFF_BYTES]:
+        raise ToolError("arquivo binário, não é possível ler como texto")
+
+    truncated = len(raw) > MAX_FILE_SIZE_FOR_READ
+    if truncated:
+        raw = raw[:MAX_FILE_SIZE_FOR_READ]
+        content = raw.decode("utf-8", errors="ignore")
+    else:
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ToolError("conteúdo não é UTF-8 válido") from None
+
+    return {
+        "content": content,
+        "line_count": len(content.splitlines()),
+        "truncated": truncated,
+    }
+
+
+READ_FILE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"relative_path": {"type": "string", "minLength": 1}},
+    "required": ["relative_path"],
+    "additionalProperties": False,
+}
+
+READ_FILE_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "content": {"type": "string"},
+        "line_count": {"type": "integer"},
+        "truncated": {"type": "boolean"},
+    },
+    "required": ["content", "line_count", "truncated"],
+    "additionalProperties": False,
+}
+
 TOOL_REGISTRY = {
     "project_info": {
         "description": "Contagem de arquivos, linhas e manifestos conhecidos na raiz do projeto.",
@@ -314,5 +389,11 @@ TOOL_REGISTRY = {
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "output_schema": LIST_FILES_OUTPUT_SCHEMA,
         "handler": _handle_list_files,
+    },
+    "read_file": {
+        "description": "Lê o conteúdo de um arquivo de texto dentro da raiz do projeto.",
+        "input_schema": READ_FILE_INPUT_SCHEMA,
+        "output_schema": READ_FILE_OUTPUT_SCHEMA,
+        "handler": _handle_read_file,
     },
 }

@@ -128,7 +128,7 @@ class TestToolsList(unittest.TestCase):
         response = dispatch(request, context)
 
         tools = response["result"]["tools"]
-        self.assertEqual(len(tools), 2)
+        self.assertEqual(len(tools), 3)
         self.assertEqual(tools[0]["name"], "project_info")
         self.assertIn("inputSchema", tools[0])
         self.assertNotIn("input_schema", tools[0])
@@ -213,6 +213,30 @@ class TestToolsList(unittest.TestCase):
         self.assertEqual(schema["type"], "object")
         self.assertIn("total_files", schema["properties"])
         self.assertIn("files", schema["properties"])
+
+    def test_read_file_declares_output_schema(self):
+        context = make_context(initialized=True)
+        request = {"jsonrpc": "2.0", "id": 76, "method": "tools/list"}
+
+        response = dispatch(request, context)
+
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        schema = tools["read_file"]["outputSchema"]
+        self.assertEqual(schema["type"], "object")
+        self.assertIn("content", schema["properties"])
+        self.assertIn("line_count", schema["properties"])
+        self.assertIn("truncated", schema["properties"])
+
+    def test_read_file_declares_input_schema_requiring_relative_path(self):
+        context = make_context(initialized=True)
+        request = {"jsonrpc": "2.0", "id": 77, "method": "tools/list"}
+
+        response = dispatch(request, context)
+
+        tools = {tool["name"]: tool for tool in response["result"]["tools"]}
+        schema = tools["read_file"]["inputSchema"]
+        self.assertIn("relative_path", schema["properties"])
+        self.assertIn("relative_path", schema["required"])
 
 
 class TestToolsCall(unittest.TestCase):
@@ -459,6 +483,65 @@ class TestToolsCall(unittest.TestCase):
 
             self.assertEqual(response["error"]["code"], -32603)
             self.assertNotIn(str(root), response["error"]["message"])
+
+    def test_read_file_returns_exact_content_for_fixture_file(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 90,
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"relative_path": "main.py"}},
+        }
+
+        response = dispatch(request, context)
+
+        content = response["result"]["structuredContent"]
+        self.assertEqual(content["content"], (FIXTURE_ROOT / "main.py").read_text())
+        self.assertFalse(content["truncated"])
+
+    def test_read_file_wraps_result_in_call_tool_result_envelope(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"relative_path": "main.py"}},
+        }
+
+        response = dispatch(request, context)
+
+        result = response["result"]
+        self.assertIn("content", result)
+        self.assertEqual(result["content"][0]["type"], "text")
+        parsed_text = json.loads(result["content"][0]["text"])
+        self.assertEqual(parsed_text, result["structuredContent"])
+        self.assertFalse(result["isError"])
+
+    def test_read_file_missing_argument_returns_structured_error(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 92,
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {}},
+        }
+
+        response = dispatch(request, context)
+
+        self.assertEqual(response["error"]["code"], -32603)
+
+    def test_read_file_invalid_argument_type_returns_structured_error(self):
+        context = make_context(project_root=FIXTURE_ROOT, initialized=True)
+        request = {
+            "jsonrpc": "2.0",
+            "id": 93,
+            "method": "tools/call",
+            "params": {"name": "read_file", "arguments": {"relative_path": 123}},
+        }
+
+        response = dispatch(request, context)
+
+        self.assertEqual(response["error"]["code"], -32603)
 
 
 class TestProjectInfoDegradesOnUnreadableEntries(unittest.TestCase):
