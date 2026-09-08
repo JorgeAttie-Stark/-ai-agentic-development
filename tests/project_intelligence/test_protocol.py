@@ -148,6 +148,10 @@ class TestToolsList(unittest.TestCase):
                 # Camada Inferência — a fronteira epistemológica
                 "data_flow_analyzer",
                 "business_rules_analyzer",
+                # Camada Análise — padrão e métrica, nunca veredito
+                "security_analyzer",
+                "improvement_analyzer",
+                "test_analyzer",
             },
         )
         for tool in tools:

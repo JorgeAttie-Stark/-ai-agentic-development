@@ -9,7 +9,7 @@ poda de `.gitignore` e a caminhada da árvore); o inverso fecharia um ciclo.
 """
 from __future__ import annotations
 
-from . import exploration, inference, understanding
+from . import analysis, exploration, inference, understanding
 
 TOOL_REGISTRY = {
     "project_info": {
@@ -104,5 +104,32 @@ TOOL_REGISTRY = {
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
         "output_schema": inference.BUSINESS_RULES_OUTPUT_SCHEMA,
         "handler": inference._handle_business_rules_analyzer,
+    },
+    "security_analyzer": {
+        "description": (
+            "Detecção de PADRÃO de segurança, não de vulnerabilidade confirmada. "
+            "Confirmar exigiria taint analysis. Nenhum finding chega a HIGH."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": analysis.SECURITY_OUTPUT_SCHEMA,
+        "handler": analysis._handle_security_analyzer,
+    },
+    "improvement_analyzer": {
+        "description": (
+            "Métricas estruturais com o valor medido e os limiares declarados. "
+            "Reporta fato, nunca juízo de qualidade."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": analysis.IMPROVEMENT_OUTPUT_SCHEMA,
+        "handler": analysis._handle_improvement_analyzer,
+    },
+    "test_analyzer": {
+        "description": (
+            "Presença e convenção de testes, ESTATICAMENTE. Nunca executa a "
+            "suíte do projeto-alvo."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": analysis.TEST_ANALYZER_OUTPUT_SCHEMA,
+        "handler": analysis._handle_test_analyzer,
     },
 }
