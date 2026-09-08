@@ -121,17 +121,24 @@ class TestProtocolErrors(unittest.TestCase):
 
 class TestToolsList(unittest.TestCase):
 
-    def test_lists_both_registered_tools_with_camel_case_schema(self):
+    def test_lists_the_registered_tool_catalog_with_camel_case_schema(self):
         context = make_context(initialized=True)
         request = {"jsonrpc": "2.0", "id": 7, "method": "tools/list"}
 
         response = dispatch(request, context)
 
         tools = response["result"]["tools"]
-        self.assertEqual(len(tools), 3)
-        self.assertEqual(tools[0]["name"], "project_info")
-        self.assertIn("inputSchema", tools[0])
-        self.assertNotIn("input_schema", tools[0])
+        # Conjunto de nomes, não contagem: pega adição *e* remoção, e obriga
+        # uma tool nova a ser mudança deliberada do catálogo, não efeito
+        # colateral silencioso.
+        self.assertEqual(
+            {tool["name"] for tool in tools},
+            {"project_info", "list_files", "read_file", "search_code", "project_profile"},
+        )
+        for tool in tools:
+            with self.subTest(tool=tool["name"]):
+                self.assertIn("inputSchema", tool)
+                self.assertNotIn("input_schema", tool)
 
     def test_project_info_declares_output_schema(self):
         # Acompanha `structuredContent` em `tools/call` — sem `outputSchema`
