@@ -70,7 +70,6 @@ it's the **scaffolding around the code**.
 ├── src/
 │   └── ai_dev_lab/
 │       ├── __init__.py
-│       ├── parity.py                  # current example
 │       └── project_intelligence/      # MCP server over stdio (Milestone 0)
 │           ├── __init__.py
 │           ├── __main__.py
@@ -79,7 +78,6 @@ it's the **scaffolding around the code**.
 │
 ├── tests/
 │   ├── __init__.py
-│   ├── test_parity.py
 │   └── project_intelligence/
 │       ├── __init__.py
 │       ├── test_config.py
@@ -192,56 +190,52 @@ Findings are reported with an explicit severity — and the skill forbids inflat
 
 ---
 
-## 🛠️ Current example
+## 🛠️ Current work — Project Intelligence MCP
 
-The first exercise is **intentionally trivial** — the point is the process, not the problem.
+An MCP server that helps Claude understand **any** software project: read it, map
+it, explain it, analyse it, document it. Language-agnostic on purpose — it points
+at an arbitrary repository, not at this one.
 
-A function that determines whether a number is even:
+Milestone 0 shipped: JSON-RPC 2.0 over stdio, `initialize` / `tools/list` /
+`tools/call`, and one tool — `project_info`. Python 3.9, stdlib only.
 
-```python
-def is_even(number):
-    # bool inherits from int: without this guard, True would pass validation
-    # and be reported as odd.
-    if isinstance(number, bool) or not isinstance(number, int):
-        raise TypeError(f"is_even espera int, recebeu {type(number).__name__}")
-    return number % 2 == 0
-```
+The design constraint that shapes everything: **no conclusion without evidence.**
+Any inferred claim carries the file, the line, the snippet, and a confidence level
+tied to the *method* that produced it — not to a feeling:
 
-<details>
-<summary><b>📊 Behaviour contract</b> — click to expand</summary>
+| `method` | `confidence` |
+|---|---|
+| `manifest-read`, `ast-parse` | `HIGH` — the evidence **is** the fact |
+| `name-pattern` | `MEDIUM` — strong convention, not semantically verified |
+| `regex-heuristic` | `LOW` — false positives expected |
 
-<br/>
+The sharpest consequence: `business_rules_analyzer` has **no field for describing
+the rule in prose**. It returns candidate locations only. That turns "don't invent
+business rules" from a principle in a prompt into a structural impossibility.
 
-| Input | Result | Why |
-|---|---|---|
-| `4` | `True` | even |
-| `7` | `False` | odd |
-| `0` | `True` | even |
-| `-2` | `True` | Python's `%` returns the divisor's sign, so negatives are safe |
-| `-3` | `False` | odd |
-| `2.5` | `TypeError` | parity is undefined — returning `False` would claim "2.5 is odd" |
-| `4.0` | `TypeError` | contract is `int` only, explicitly |
-| `True` | `TypeError` | `bool` is a subclass of `int`; silently answering would be a trap |
-| `"4"` | `TypeError` | without the guard, `%` is string formatting and the error is misleading |
-| `None` | `TypeError` | no parity |
-
-</details>
+Full architecture and roadmap: `docs/plan-project-intelligence-mcp.md`.
 
 ### 🔍 Code Review in action
 
-The first version of this function was two lines and had **no validation**.
-The repo's own Code Review skill was then pointed at it, and produced four findings:
+Milestone 0 went through the full `/feature` pipeline. The `reviewer` rejected it,
+and every finding below was real — verified on the wire, not just in a test:
 
 | Severity | Finding | Outcome |
 |---|---|---|
-| 🟠 `MEDIUM` | Package was literally named `src` — not distributable, breaks once installed | ✅ renamed to `ai_dev_lab` |
-| 🟡 `LOW` | `CLAUDE.md` declared Pytest, the suite used `unittest` | ✅ documentation corrected |
-| 🟡 `LOW` | `2.5` returned `False`, `True` returned `False` — undefined and untested | ✅ contract enforced + tested |
-| ⚪ `INFO` | `is_even("4")` raised a misleading string-formatting error | ✅ fixed by the guard |
+| 🔴 `BLOQUEANTE` | `tools/call` returned the raw domain dict, missing `content` — required by `CallToolResult`. A real client would get **nothing**: the Python SDK fails validation, the TypeScript SDK hands the model an empty array | ✅ wrapped properly |
+| 🟠 `IMPORTANTE` | `os.walk`'s `onerror` killed the whole scan over **one** bad file — a dangling symlink, an unreadable dir, or a file removed by a watcher mid-walk | ✅ degrades and counts instead |
+| 🟠 `IMPORTANTE` | `.expanduser()` was dead code after the join, so `--root ~/proj` resolved to `<cwd>/~/proj` | ✅ expands before joining |
+| 🟠 `IMPORTANTE` | The fix above introduced a regression: `~nonexistent_user` raised an uncaught `RuntimeError` | ✅ mapped to `ConfigError` |
+| ⚪ → 🟠 | Direct indexing of `output_schema` meant one future tool missing the key would wipe the **entire** tool list | ✅ made optional |
 
-**This is the whole thesis of the repo in one table:** the agent reviewed its own
-output against a written process and found real problems — not because it was
-asked to be critical, but because it had a checklist and evidence rules.
+**This is the whole thesis of the repo in one table.** Three of those findings are
+the same class of error: an assumption about how the client behaves that passes
+100% of the automated tests. Two were caught by reviewing against the
+specification. A third — Claude Desktop silently dropping the `cwd` key from
+`mcpServers` — only surfaced when the server was actually connected to the app.
+
+The rule that came out of it, now written into the plan's `Risks`:
+**a test written from an assumption only confirms the assumption.**
 
 ---
 
