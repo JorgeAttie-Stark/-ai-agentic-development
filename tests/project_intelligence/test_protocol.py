@@ -133,7 +133,19 @@ class TestToolsList(unittest.TestCase):
         # colateral silencioso.
         self.assertEqual(
             {tool["name"] for tool in tools},
-            {"project_info", "list_files", "read_file", "search_code", "project_profile"},
+            {
+                # Camada Exploração — retrieval pura
+                "project_info",
+                "list_files",
+                "read_file",
+                "search_code",
+                "project_profile",
+                # Camada Entendimento — envelope de findings/confidence
+                "project_map",
+                "architecture_explainer",
+                "code_structure_analyzer",
+                "dependency_analyzer",
+            },
         )
         for tool in tools:
             with self.subTest(tool=tool["name"]):

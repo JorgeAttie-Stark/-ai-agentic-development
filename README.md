@@ -11,7 +11,7 @@ and how to give them the right **context**, **instructions**, **tools** and **wo
 
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude_Code-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-109_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-155_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-4C8BF5?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-work_in_progress-F0B429?style=for-the-badge)
 
@@ -201,9 +201,9 @@ An MCP server that helps Claude understand **any** software project: read it, ma
 it, explain it, analyse it, document it. Language-agnostic on purpose — it points
 at an arbitrary repository, not at this one.
 
-Milestones 0 and 1 shipped: JSON-RPC 2.0 over stdio, `initialize` /
-`tools/list` / `tools/call`, and five tools — the complete Exploration layer.
-Python 3.9, stdlib only.
+Milestones 0 through 2 shipped: JSON-RPC 2.0 over stdio, `initialize` /
+`tools/list` / `tools/call`, and **nine tools** — the complete Exploration and
+Understanding layers. Python 3.9, stdlib only.
 
 The design constraint that shapes everything: **no conclusion without evidence.**
 Any inferred claim carries the file, the line, the snippet, and a confidence level
@@ -257,7 +257,7 @@ Expected output:
 
 ```
 ----------------------------------------------------------------------
-Ran 109 tests in 0.190s
+Ran 155 tests in 0.269s
 
 OK
 ```
@@ -280,6 +280,22 @@ arbitrary `projectRoot` — not necessarily this repository.
 | `read_file` | text content of one file, confined to the root, size-capped |
 | `search_code` | regex hits across text files — file, line number, matching line |
 | `project_profile` | consolidated view derived from `project_info` + `list_files` |
+
+And four **Understanding** tools — the first ones that *claim* something, so
+every claim carries `evidence` and a `confidence` derived from its `method`:
+
+| Tool | Method | `confidence` |
+|---|---|---|
+| `project_map` | directory tree — factual, **no** findings | — |
+| `architecture_explainer` | `name-pattern` | `MEDIUM`, capped |
+| `code_structure_analyzer` | `ast-parse` (Python) / `regex-heuristic` (rest) | `HIGH` / `LOW` |
+| `dependency_analyzer` | `manifest-read` / `regex-heuristic` (TOML) | `HIGH` / `LOW` |
+
+`findings.py` enforces this in code, not by convention: there is **no
+`confidence` parameter** in the API. The only way to emit `HIGH` is to use a
+method that parses a well-defined format. A hand-built dict with inflated
+confidence is caught by `validate_finding`, and evidence refuses an absolute
+path in its constructor.
 
 All three are **pure retrieval** — they return observed fact, with no
 `findings`/`confidence` envelope. That envelope starts in Milestone 2, with the
