@@ -41,6 +41,8 @@ fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para três tools
 | `project_info` | contagem por extensão, total de arquivos e linhas, manifestos na raiz |
 | `list_files` | inventário de arquivos, ignorando `.git/` e o `.gitignore` de topo |
 | `read_file` | conteúdo de um arquivo de texto, confinado à raiz via `paths.resolve_within` |
+| `search_code` | regex nos arquivos de texto; devolve arquivo, linha e o trecho que casou |
+| `project_profile` | visão consolidada, derivada de `project_info` + `list_files` |
 
 As três são retrieval pura — devolvem fato observado, sem envelope de
 `findings`/`confidence`. Esse envelope começa no Milestone 2, com as tools de

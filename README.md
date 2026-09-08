@@ -11,7 +11,7 @@ and how to give them the right **context**, **instructions**, **tools** and **wo
 
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Claude Code](https://img.shields.io/badge/Claude_Code-D97757?style=for-the-badge&logo=anthropic&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-6_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-109_passing-3FB950?style=for-the-badge&logo=checkmarx&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-4C8BF5?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-work_in_progress-F0B429?style=for-the-badge)
 
@@ -70,11 +70,14 @@ it's the **scaffolding around the code**.
 ├── src/
 │   └── ai_dev_lab/
 │       ├── __init__.py
-│       └── project_intelligence/      # MCP server over stdio (Milestone 0)
+│       └── project_intelligence/      # MCP server over stdio
 │           ├── __init__.py
-│           ├── __main__.py
-│           ├── config.py
-│           └── protocol.py
+│           ├── __main__.py            # entrypoint: --root, then serve
+│           ├── config.py              # resolves and validates projectRoot
+│           ├── errors.py              # ToolError (leaf module, no imports)
+│           ├── paths.py               # resolve_within — root containment
+│           ├── protocol.py            # JSON-RPC transport only
+│           └── exploration.py         # the 5 Exploration-layer tools
 │
 ├── tests/
 │   ├── __init__.py
@@ -82,7 +85,9 @@ it's the **scaffolding around the code**.
 │       ├── __init__.py
 │       ├── test_config.py
 │       ├── test_main.py
+│       ├── test_paths.py
 │       ├── test_protocol.py
+│       ├── test_exploration.py
 │       └── fixtures/fake_project/     # synthetic multi-language target
 │
 ├── docs/
@@ -197,8 +202,8 @@ it, explain it, analyse it, document it. Language-agnostic on purpose — it poi
 at an arbitrary repository, not at this one.
 
 Milestones 0 and 1 shipped: JSON-RPC 2.0 over stdio, `initialize` /
-`tools/list` / `tools/call`, and three tools — `project_info`, `list_files` and
-`read_file`. Python 3.9, stdlib only.
+`tools/list` / `tools/call`, and five tools — the complete Exploration layer.
+Python 3.9, stdlib only.
 
 The design constraint that shapes everything: **no conclusion without evidence.**
 Any inferred claim carries the file, the line, the snippet, and a confidence level
@@ -252,7 +257,7 @@ Expected output:
 
 ```
 ----------------------------------------------------------------------
-Ran 89 tests in 0.117s
+Ran 109 tests in 0.190s
 
 OK
 ```
@@ -273,6 +278,8 @@ arbitrary `projectRoot` — not necessarily this repository.
 | `project_info` | counts by extension, total files and lines, known manifests at the root |
 | `list_files` | file inventory, `.git/` always ignored, best-effort top-level `.gitignore` |
 | `read_file` | text content of one file, confined to the root, size-capped |
+| `search_code` | regex hits across text files — file, line number, matching line |
+| `project_profile` | consolidated view derived from `project_info` + `list_files` |
 
 All three are **pure retrieval** — they return observed fact, with no
 `findings`/`confidence` envelope. That envelope starts in Milestone 2, with the

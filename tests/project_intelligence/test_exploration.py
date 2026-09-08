@@ -348,3 +348,196 @@ class ReadFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _call_search_code(root, pattern, **kwargs):
+    arguments = {"pattern": pattern}
+    arguments.update(kwargs)
+    return exploration._handle_search_code(Path(root), arguments)
+
+
+def _call_project_profile(root):
+    return exploration._handle_project_profile(Path(root), {})
+
+
+class SearchCodeContractTests(unittest.TestCase):
+
+    def test_returns_relative_path_line_number_and_content(self):
+        result = _call_search_code(FIXTURE_ROOT, "def ")
+        self.assertTrue(result["matches"])
+        for match in result["matches"]:
+            self.assertNotIn(str(FIXTURE_ROOT), match["file"])
+            self.assertFalse(match["file"].startswith("/"))
+            self.assertGreaterEqual(match["line_number"], 1)
+            self.assertIn("def ", match["line"])
+
+    def test_matches_are_sorted_by_file_then_line(self):
+        result = _call_search_code(FIXTURE_ROOT, ".")
+        keys = [(m["file"], m["line_number"]) for m in result["matches"]]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_pattern_is_a_regex(self):
+        result = _call_search_code(FIXTURE_ROOT, r"^def\s+\w+")
+        self.assertTrue(result["matches"])
+
+    def test_invalid_regex_raises_tool_error(self):
+        with self.assertRaises(ToolError):
+            _call_search_code(FIXTURE_ROOT, "(unclosed")
+
+    def test_missing_or_empty_pattern_raises_tool_error(self):
+        for arguments in ({}, {"pattern": ""}, {"pattern": 123}):
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(ToolError):
+                    exploration._handle_search_code(FIXTURE_ROOT, arguments)
+
+    def test_case_insensitive_by_default_and_sensitive_on_request(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.txt").write_text("HELLO\n")
+
+            self.assertEqual(len(_call_search_code(root, "hello")["matches"]), 1)
+            sensitive = _call_search_code(root, "hello", case_sensitive=True)
+            self.assertEqual(sensitive["matches"], [])
+
+
+class SearchCodeSafetyTests(unittest.TestCase):
+
+    def test_ignores_git_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            (root / ".git" / "COMMIT_EDITMSG").write_text("needle\n")
+            (root / "real.txt").write_text("needle\n")
+
+            result = _call_search_code(root, "needle")
+            self.assertEqual([m["file"] for m in result["matches"]], ["real.txt"])
+
+    def test_respects_top_level_gitignore(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".gitignore").write_text("build/\n*.log\n")
+            (root / "build").mkdir()
+            (root / "build" / "out.txt").write_text("needle\n")
+            (root / "app.log").write_text("needle\n")
+            (root / "keep.txt").write_text("needle\n")
+
+            result = _call_search_code(root, "needle")
+            self.assertEqual([m["file"] for m in result["matches"]], ["keep.txt"])
+            self.assertTrue(result["gitignore_applied"])
+            self.assertTrue(result["scope_limitations"])
+
+    def test_binary_file_is_skipped_never_decoded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "data.bin").write_bytes(b"needle\x00needle")
+            (root / "text.txt").write_text("needle\n")
+
+            result = _call_search_code(root, "needle")
+            self.assertEqual([m["file"] for m in result["matches"]], ["text.txt"])
+            self.assertEqual(result["binary_files_skipped"], 1)
+
+    def test_file_over_size_cap_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "big.txt").write_text("needle\n")
+
+            with patch.object(exploration, "MAX_FILE_SIZE_FOR_LINE_COUNT", 0):
+                result = _call_search_code(root, "needle")
+
+            self.assertEqual(result["matches"], [])
+            self.assertEqual(result["large_files_skipped"], 1)
+
+    def test_result_cap_truncates_and_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "many.txt").write_text("needle\n" * 10)
+
+            with patch.object(exploration, "MAX_SEARCH_RESULTS", 3):
+                result = _call_search_code(root, "needle")
+
+            self.assertEqual(len(result["matches"]), 3)
+            self.assertTrue(result["truncated"])
+
+    def test_long_matching_line_is_truncated_in_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "min.js").write_text("needle" + "x" * 5000 + "\n")
+
+            with patch.object(exploration, "MAX_MATCH_LINE_LENGTH", 50):
+                result = _call_search_code(root, "needle")
+
+            self.assertEqual(len(result["matches"][0]["line"]), 50)
+
+    def test_fifo_without_writer_does_not_hang(self):
+        """Regressão do Milestone 0: um FIFO sem writer penduraria o loop
+        single-thread. Uma regressão aqui não falha asserção — pendura a suíte.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "real.txt").write_text("needle\n")
+            os.mkfifo(root / "pipe")
+
+            result = _call_search_code(root, "needle")
+            self.assertEqual([m["file"] for m in result["matches"]], ["real.txt"])
+            self.assertEqual(result["unreadable_entries_skipped"], 1)
+
+    def test_error_messages_never_contain_absolute_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            try:
+                _call_search_code(root, "(unclosed")
+            except ToolError as error:
+                self.assertNotIn(str(root.resolve()), str(error))
+
+
+class ProjectProfileTests(unittest.TestCase):
+
+    def test_consolidates_without_duplicating_source_data(self):
+        profile = _call_project_profile(FIXTURE_ROOT)
+        info = exploration._handle_project_info(FIXTURE_ROOT, {})
+
+        self.assertEqual(profile["total_files"], info["total_files"])
+        self.assertEqual(profile["total_lines"], info["total_lines"])
+        self.assertEqual(profile["manifests_present"], info["manifests_present"])
+        self.assertEqual(profile["derived_from"], ["project_info", "list_files"])
+
+    def test_top_extensions_are_sorted_by_count_descending(self):
+        profile = _call_project_profile(FIXTURE_ROOT)
+        counts = [entry["count"] for entry in profile["top_extensions"]]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+
+    def test_largest_directories_derived_from_listed_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "many").mkdir()
+            for index in range(3):
+                (root / "many" / f"f{index}.txt").write_text("x\n")
+            (root / "one.txt").write_text("x\n")
+
+            profile = _call_project_profile(root)
+            largest = profile["largest_directories"][0]
+            self.assertEqual(largest["directory"], "many")
+            self.assertEqual(largest["file_count"], 3)
+
+    def test_max_depth_counts_nesting_of_listed_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a" / "b").mkdir(parents=True)
+            (root / "a" / "b" / "deep.txt").write_text("x\n")
+
+            self.assertEqual(_call_project_profile(root)["max_depth"], 3)
+
+    def test_empty_directory_returns_zeroed_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = _call_project_profile(Path(tmp))
+
+        self.assertEqual(profile["total_files"], 0)
+        self.assertEqual(profile["total_lines"], 0)
+        self.assertEqual(profile["manifests_present"], [])
+        self.assertEqual(profile["top_extensions"], [])
+        self.assertEqual(profile["largest_directories"], [])
+        self.assertEqual(profile["max_depth"], 0)
+
+    def test_propagates_tool_error_from_missing_root(self):
+        with self.assertRaises(ToolError):
+            _call_project_profile(Path("/nao/existe/xyz"))
