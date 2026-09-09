@@ -18,7 +18,47 @@ class ConfigError(Exception):
 def _build_arg_parser():
     parser = argparse.ArgumentParser(prog="project-intelligence", add_help=False)
     parser.add_argument("--root", default=None)
+    parser.add_argument(
+        "--allow-parent",
+        action="append",
+        help=(
+            "diretório sob o qual qualquer repositório é analisável. "
+            "Repetível. Define a fronteira de leitura do servidor."
+        ),
+    )
     return parser
+
+
+def resolve_allowed_parents(argv, cwd):
+    """Diretórios sob os quais qualquer repositório é analisável.
+
+    Sem `--allow-parent`, o servidor alcança só a raiz configurada — o
+    comportamento anterior, preservado. Com um ou mais, qualquer subdiretório
+    passa a ser um `root` válido nas tools, sem reiniciar o app.
+
+    Esta é a fronteira de segurança do servidor: `read_file` devolve conteúdo
+    de arquivo, então o que está listado aqui é exatamente o que ele pode ler.
+    Um diretório-pai inexistente é erro de CONFIGURAÇÃO e derruba a
+    inicialização — subir com uma fronteira que o operador acha que declarou e
+    não declarou é pior que não subir.
+    """
+    args = _build_arg_parser().parse_args(argv)
+    parents = []
+
+    for raw in args.allow_parent or []:
+        try:
+            expanded = Path(raw).expanduser()
+        except RuntimeError as error:
+            raise ConfigError(f"--allow-parent inválido: {error}") from error
+
+        parent = Path(cwd, expanded).resolve()
+        if not parent.exists():
+            raise ConfigError(f"--allow-parent não existe: {parent}")
+        if not parent.is_dir():
+            raise ConfigError(f"--allow-parent não é um diretório: {parent}")
+        parents.append(parent)
+
+    return parents
 
 
 def resolve_project_root(argv, cwd):
@@ -58,7 +98,7 @@ def resolve_project_root(argv, cwd):
     return project_root
 
 
-def build_context(project_root):
+def build_context(project_root, allowed_parents=None):
     """Monta o `context` do servidor — mapeamento de raízes, não `Path` solto.
 
     Uma entrada só hoje ("default"); a costura para múltiplos projetos é a
@@ -66,4 +106,11 @@ def build_context(project_root):
     `initialized` começa `False`: só `protocol.dispatch` o marca `True`, depois
     de responder `initialize` com sucesso.
     """
-    return {"roots": {"default": project_root}, "initialized": False}
+    return {
+        "roots": {"default": project_root},
+        # A costura de múltiplas raízes deixou de ser só a forma do dict: agora
+        # `allowed_parents` é a fronteira que decide qual `root` pedido pelo
+        # cliente é aceito.
+        "allowed_parents": list(allowed_parents or []),
+        "initialized": False,
+    }

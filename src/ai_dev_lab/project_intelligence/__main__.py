@@ -9,21 +9,30 @@ import os
 import sys
 
 from ai_dev_lab.project_intelligence import protocol
-from ai_dev_lab.project_intelligence.config import ConfigError, build_context, resolve_project_root
+from ai_dev_lab.project_intelligence.config import (
+    ConfigError,
+    build_context,
+    resolve_allowed_parents,
+    resolve_project_root,
+)
 
 
 def main():
     logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
+    argv = sys.argv[1:]
+    cwd = os.getcwd()
+
     try:
-        project_root = resolve_project_root(sys.argv[1:], os.getcwd())
+        project_root = resolve_project_root(argv, cwd)
+        allowed_parents = resolve_allowed_parents(argv, cwd)
     except ConfigError as error:
         # Erro de configuração: mensagem de operador via stderr, processo não
         # sobe. Nunca trafega pelo protocolo MCP.
         print(f"project-intelligence: {error}", file=sys.stderr)
         sys.exit(1)
 
-    context = build_context(project_root)
+    context = build_context(project_root, allowed_parents)
     protocol.serve_stdio(sys.stdin, sys.stdout, context)
 
 

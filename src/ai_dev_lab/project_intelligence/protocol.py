@@ -12,6 +12,7 @@ import json
 import logging
 
 from .errors import ToolError
+from .paths import resolve_requested_root
 from .registry import TOOL_REGISTRY
 
 logger = logging.getLogger(__name__)
@@ -79,10 +80,14 @@ def _handle_tools_call(request_id, params, context):
     if not isinstance(arguments, dict):
         return _error_response(request_id, -32602, "arguments deve ser um objeto")
 
-    project_root = context["roots"]["default"]
     handler = TOOL_REGISTRY[name]["handler"]
 
     try:
+        # O `root` é resolvido AQUI, num lugar só. Nenhum dos 18 handlers sabe
+        # que múltiplas raízes existem — eles continuam recebendo um
+        # `project_root` já validado, exatamente como antes. É o retorno da
+        # costura que o Milestone 0 deixou pronta.
+        project_root = resolve_requested_root(context, arguments.get("root"))
         result = handler(project_root, arguments)
     except ToolError as error:
         return _error_response(request_id, -32603, str(error))
