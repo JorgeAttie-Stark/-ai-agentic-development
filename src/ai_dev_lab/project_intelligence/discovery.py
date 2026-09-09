@@ -34,6 +34,19 @@ DISCOVERY_LIMITATIONS = (
     "reconhece repositório pela presença de `.git`; projeto sem versionamento não aparece",
 )
 
+# A mensagem diz o que fazer, não só o que faltou: sem a causa, o humano
+# conclui que o repositório não existe e o move de lugar. No macOS,
+# `~/Desktop`, `~/Documents` e `~/Downloads` são gated por TCC POR APLICATIVO —
+# o terminal pode ter acesso e o app cliente não, e aí a mesma varredura
+# devolve listas diferentes.
+UNREADABLE_LIMITATION = (
+    "não foi possível ler {count} diretório(s) — os repositórios dentro deles "
+    "NÃO aparecem nesta lista, e a ausência aqui não significa que não existem; "
+    "veja `unreadable_directories`. No macOS, `~/Desktop`, `~/Documents` e "
+    "`~/Downloads` exigem permissão concedida ao aplicativo cliente em "
+    "Ajustes do Sistema > Privacidade e Segurança > Arquivos e Pastas"
+)
+
 LIST_REPOSITORIES_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -46,20 +59,31 @@ LIST_REPOSITORIES_OUTPUT_SCHEMA = {
             },
         },
         "searched": {"type": "array", "items": {"type": "string"}},
+        "unreadable_directories": {"type": "array", "items": {"type": "string"}},
         "truncated": {"type": "boolean"},
         "scope_limitations": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["repositories", "searched", "truncated", "scope_limitations"],
+    "required": [
+        "repositories",
+        "searched",
+        "unreadable_directories",
+        "truncated",
+        "scope_limitations",
+    ],
 }
 
 
-def _subdirectories(current):
+def _subdirectories(current, unreadable):
     try:
         with os.scandir(current) as entries:
             listed = sorted(entries, key=lambda entry: entry.name)
     except OSError:
-        # Diretório sem permissão de leitura não interrompe a varredura das
-        # outras áreas. `~/Library` de outro usuário é o caso comum.
+        # Degradar sim, silenciar não. Este `except` já engoliu um
+        # `PermissionError` em `~/Desktop` — o cliente recebeu 15 repos em vez
+        # de 19, concluiu que o `app-web` "não estava clonado" e recomendou
+        # mover o repositório. Ausência não declarada vira inexistência para
+        # quem lê.
+        unreadable.append(str(current))
         return []
 
     return [
@@ -73,7 +97,7 @@ def _subdirectories(current):
     ]
 
 
-def _discover(area):
+def _discover(area, unreadable):
     found = []
     pending = [(Path(area), 0)]
 
@@ -84,7 +108,7 @@ def _discover(area):
             continue
         if depth >= MAX_SCAN_DEPTH:
             continue
-        pending.extend((child, depth + 1) for child in _subdirectories(current))
+        pending.extend((child, depth + 1) for child in _subdirectories(current, unreadable))
 
     return found
 
@@ -93,8 +117,9 @@ def _handle_list_repositories(project_root, arguments, context):
     areas = [context["roots"]["default"], *context.get("allowed_parents", [])]
 
     by_path = {}
+    unreadable = []
     for area in areas:
-        for repository in _discover(area):
+        for repository in _discover(area, unreadable):
             by_path.setdefault(str(repository), repository.name)
 
     paths = sorted(by_path)
@@ -102,10 +127,13 @@ def _handle_list_repositories(project_root, arguments, context):
     limitations = list(DISCOVERY_LIMITATIONS)
     if truncated:
         limitations.append(f"mostrando {MAX_REPOSITORIES} de {len(paths)} repositórios")
+    if unreadable:
+        limitations.append(UNREADABLE_LIMITATION.format(count=len(unreadable)))
 
     return {
         "repositories": [{"path": path, "name": by_path[path]} for path in paths[:MAX_REPOSITORIES]],
         "searched": [str(area) for area in areas],
+        "unreadable_directories": sorted(set(unreadable)),
         "truncated": truncated,
         "scope_limitations": limitations,
     }
