@@ -169,3 +169,21 @@ TOOL_REGISTRY = {
         "handler": presentation._handle_generate_project_summary,
     },
 }
+
+
+# `root` é injetado nos 18 schemas aqui, num lugar só, em vez de repetido
+# dezoito vezes. Opcional em todas: ausente significa a raiz padrão, que é o
+# comportamento de todo o histórico do servidor.
+_ROOT_PROPERTY = {
+    "type": "string",
+    "description": (
+        "caminho do repositório a analisar. Opcional: ausente usa a raiz "
+        "configurada no servidor. Só caminhos sob um --allow-parent são aceitos."
+    ),
+}
+
+for _spec in TOOL_REGISTRY.values():
+    _spec["input_schema"] = {
+        **_spec["input_schema"],
+        "properties": {**_spec["input_schema"]["properties"], "root": _ROOT_PROPERTY},
+    }

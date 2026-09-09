@@ -220,7 +220,15 @@ class TestToolsList(unittest.TestCase):
         self.assertIn("outputSchema", tools["project_info"])
         self.assertEqual(tools["project_info"]["outputSchema"]["type"], "object")
 
-    def test_list_files_schema_has_empty_input_schema_without_root_id(self):
+    def test_list_files_declares_root_as_optional_and_never_required(self):
+        """A trava mudou de sentido, de propósito.
+
+        Até o Milestone 3 este teste afirmava `properties: {}` — era a trava do
+        Definition of Done contra implementar múltiplas raízes antes da hora.
+        A evolução foi feita deliberadamente, então a trava passa a ser outra:
+        `root` existe, é **opcional**, e a raiz padrão continua sendo o
+        comportamento de quem não passa o argumento.
+        """
         context = make_context(initialized=True)
         request = {"jsonrpc": "2.0", "id": 74, "method": "tools/list"}
 
@@ -228,10 +236,9 @@ class TestToolsList(unittest.TestCase):
 
         tools = {tool["name"]: tool for tool in response["result"]["tools"]}
         schema = tools["list_files"]["inputSchema"]
-        self.assertEqual(
-            schema, {"type": "object", "properties": {}, "additionalProperties": False}
-        )
-        self.assertNotIn("root_id", schema["properties"])
+        self.assertEqual(schema["properties"]["root"]["type"], "string")
+        self.assertNotIn("root", schema.get("required", []))
+        self.assertFalse(schema["additionalProperties"])
 
     def test_list_files_declares_output_schema(self):
         context = make_context(initialized=True)
