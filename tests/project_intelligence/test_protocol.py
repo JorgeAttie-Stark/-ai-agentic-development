@@ -134,6 +134,8 @@ class TestToolsList(unittest.TestCase):
         self.assertEqual(
             {tool["name"] for tool in tools},
             {
+                # Descoberta — quais raízes o cliente pode pedir
+                "list_repositories",
                 # Camada Exploração — retrieval pura
                 "project_info",
                 "list_files",
@@ -173,7 +175,10 @@ class TestToolsList(unittest.TestCase):
 
         response = dispatch(request, context)
 
-        schema = response["result"]["tools"][0]["outputSchema"]
+        # Busca por nome, não por índice: ordem do catálogo não é contrato, e
+        # `tools[0]` fazia este teste falhar ao registrar uma tool nova antes.
+        described = {tool["name"]: tool for tool in response["result"]["tools"]}
+        schema = described["project_info"]["outputSchema"]
         self.assertEqual(schema["type"], "object")
         self.assertIn("total_files", schema["properties"])
 
@@ -460,8 +465,8 @@ class TestToolsCall(unittest.TestCase):
 
             response = dispatch(request, context)
 
-            self.assertEqual(response["error"]["code"], -32603)
-            self.assertNotIn(str(root), response["error"]["message"])
+            self.assertTrue(response["result"]["isError"])
+            self.assertNotIn(str(root), response["result"]["content"][0]["text"])
 
     def test_list_files_returns_exact_result_for_fixture(self):
         context = make_context(project_root=FIXTURE_ROOT, initialized=True)
@@ -519,8 +524,8 @@ class TestToolsCall(unittest.TestCase):
 
             response = dispatch(request, context)
 
-            self.assertEqual(response["error"]["code"], -32603)
-            self.assertNotIn(str(root), response["error"]["message"])
+            self.assertTrue(response["result"]["isError"])
+            self.assertNotIn(str(root), response["result"]["content"][0]["text"])
 
     def test_read_file_returns_exact_content_for_fixture_file(self):
         context = make_context(project_root=FIXTURE_ROOT, initialized=True)
@@ -566,7 +571,7 @@ class TestToolsCall(unittest.TestCase):
 
         response = dispatch(request, context)
 
-        self.assertEqual(response["error"]["code"], -32603)
+        self.assertTrue(response["result"]["isError"])
 
     def test_read_file_invalid_argument_type_returns_structured_error(self):
         context = make_context(project_root=FIXTURE_ROOT, initialized=True)
@@ -579,7 +584,7 @@ class TestToolsCall(unittest.TestCase):
 
         response = dispatch(request, context)
 
-        self.assertEqual(response["error"]["code"], -32603)
+        self.assertTrue(response["result"]["isError"])
 
 
 class TestProjectInfoDegradesOnUnreadableEntries(unittest.TestCase):

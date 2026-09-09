@@ -34,7 +34,18 @@ O pacote importável é `ai_dev_lab`, dentro de `src/`.
 
 Servidor MCP sobre stdio (JSON-RPC 2.0, uma requisição por linha), que aponta
 para um `projectRoot` resolvido de `--root`, com o `cwd` do processo como
-fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para dezoito tools:
+fallback. Hoje expõe `initialize`, `tools/list` e `tools/call` para dezenove
+tools:
+
+**Descoberta** — quais raízes o cliente pode pedir:
+
+| Tool | O que faz |
+|---|---|
+| `list_repositories` | caminho absoluto de cada repositório alcançável |
+
+Única tool que devolve caminho absoluto, e de propósito: o cliente precisa
+devolvê-lo em `root`. Sem ela, usar outra raiz depende do humano digitar o
+caminho — foi o que travou o primeiro teste real no Claude Desktop.
 
 **Camada Exploração** — retrieval pura, sem envelope:
 
@@ -92,8 +103,8 @@ Onde não há evidência, a tool reporta **ausência**, não palpite. Lista de
 findings vazia com limitação declarada é resposta melhor que inferência fraca
 apresentada como descoberta.
 
-As cinco primeiras são retrieval pura — devolvem fato observado, sem envelope
-de `findings`/`confidence`.
+`list_repositories` e as cinco da camada Exploração são retrieval pura —
+devolvem fato observado, sem envelope de `findings`/`confidence`.
 
 Rodar o servidor apontado para um projeto alvo:
 
@@ -110,7 +121,8 @@ Configuração no Claude Desktop (`claude_desktop_config.json`):
       "command": "python3",
       "args": [
         "-m", "ai_dev_lab.project_intelligence",
-        "--root", "/caminho/do/projeto/alvo"
+        "--root", "/caminho/do/projeto/alvo",
+        "--allow-parent", "/Users/seu-usuario"
       ],
       "env": { "PYTHONPATH": "/caminho/do/repositorio/src" }
     }
@@ -124,6 +136,32 @@ Configuração no Claude Desktop (`claude_desktop_config.json`):
 inútil, sem erro que indique a causa.
 
 O fallback para `cwd` continua valendo ao rodar o servidor à mão no terminal.
+
+### Alcance: qualquer repositório, não qualquer arquivo
+
+`--allow-parent` é repetível e delimita onde o cliente pode pedir uma raiz.
+Toda tool aceita um `root` opcional; ausente, usa a raiz de `--root`.
+
+Um `root` pedido pelo cliente passa por quatro portas, nesta ordem — caminho
+absoluto, dentro de algum `--allow-parent`, é diretório, **tem `.git`**. A
+última existe porque `--allow-parent $HOME` alcança `~/.ssh`, `~/.config/gh` e
+`~/.zsh_history`, e `read_file` é uma das tools: sem ela, "qualquer repo" viria
+junto com qualquer arquivo da máquina. A raiz de `--root` é isenta da porta de
+`.git`, porque é decisão explícita de quem sobe o servidor.
+
+A mensagem de recusa nunca nomeia os `--allow-parent` — dizer "não é nenhum
+destes: /Users/..." vazaria a estrutura da máquina.
+
+### Erro de tool vs erro de protocolo
+
+Erro de **execução** de tool volta no `CallToolResult` com `isError: true` e a
+razão no bloco `content`, como manda a spec. `-32603` fica só para exceção
+inesperada em `serve_stdio`. Erro de **protocolo** (`-32602`) é para requisição
+inválida — tool inexistente, `arguments` que não é objeto — onde nada executou.
+
+A distinção é observável: o Claude Desktop mostrava "uma ferramenta falhou"
+para um argumento inválido, e o modelo não recebia a razão num lugar onde
+pudesse se corrigir.
 
 Detalhes de arquitetura, escopo e roadmap completos em
 `docs/plan-project-intelligence-mcp.md`.
