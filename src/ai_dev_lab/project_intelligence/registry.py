@@ -9,9 +9,20 @@ poda de `.gitignore` e a caminhada da árvore); o inverso fecharia um ciclo.
 """
 from __future__ import annotations
 
-from . import analysis, exploration, inference, presentation, understanding
+from . import analysis, discovery, exploration, inference, presentation, understanding
 
 TOOL_REGISTRY = {
+    "list_repositories": {
+        "description": (
+            "Lista os repositórios que este servidor pode analisar, com o caminho "
+            "absoluto de cada um. Chame antes de passar `root` em qualquer outra "
+            "tool: os caminhos aceitos são exatamente os desta lista."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "output_schema": discovery.LIST_REPOSITORIES_OUTPUT_SCHEMA,
+        "handler": discovery._handle_list_repositories,
+        "wants_context": True,
+    },
     "project_info": {
         "description": "Contagem de arquivos, linhas e manifestos conhecidos na raiz do projeto.",
         "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},

@@ -80,17 +80,36 @@ def _handle_tools_call(request_id, params, context):
     if not isinstance(arguments, dict):
         return _error_response(request_id, -32602, "arguments deve ser um objeto")
 
-    handler = TOOL_REGISTRY[name]["handler"]
+    spec = TOOL_REGISTRY[name]
+    handler = spec["handler"]
 
     try:
-        # O `root` é resolvido AQUI, num lugar só. Nenhum dos 18 handlers sabe
-        # que múltiplas raízes existem — eles continuam recebendo um
-        # `project_root` já validado, exatamente como antes. É o retorno da
+        # O `root` é resolvido AQUI, num lugar só. Nenhum dos handlers de
+        # análise sabe que múltiplas raízes existem — eles continuam recebendo
+        # um `project_root` já validado, exatamente como antes. É o retorno da
         # costura que o Milestone 0 deixou pronta.
         project_root = resolve_requested_root(context, arguments.get("root"))
-        result = handler(project_root, arguments)
+        # `list_repositories` é a única que precisa da fronteira inteira, e não
+        # de uma raiz: o produto dela É a lista de raízes alcançáveis.
+        passed = (project_root, arguments, context) if spec.get("wants_context") else (
+            project_root,
+            arguments,
+        )
+        result = handler(*passed)
     except ToolError as error:
-        return _error_response(request_id, -32603, str(error))
+        # Spec MCP 2025-06-18: erro de EXECUÇÃO de tool vai no `CallToolResult`
+        # com `isError: true`, não como erro JSON-RPC. `-32603` é *Internal
+        # error*, e o cliente real mostrou "uma ferramenta falhou" para um
+        # argumento inválido — lê como servidor quebrado, e a razão não chegava
+        # ao modelo num lugar onde ele pudesse se corrigir sozinho.
+        #
+        # `-32602` (abaixo) continua sendo protocolo, e está certo: lá a
+        # requisição em si é inválida — tool inexistente, `arguments` que não é
+        # objeto. Nada foi executado.
+        return _success_response(
+            request_id,
+            {"content": [{"type": "text", "text": f"erro: {error}"}], "isError": True},
+        )
 
     # `CallToolResult` da spec 2025-06-18: `content` é obrigatório — é o que
     # o modelo efetivamente lê. `structuredContent` espelha o mesmo dado para
