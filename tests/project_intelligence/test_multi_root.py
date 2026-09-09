@@ -1,3 +1,5 @@
+import contextlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -411,3 +413,79 @@ class ToolErrorsBelongInTheResultTests(unittest.TestCase):
             response = self._dispatch("inventada", {}, root, [])
 
             self.assertEqual(response["error"]["code"], -32602)
+
+
+class DiscoveryDeclaresWhatItCouldNotReadTests(unittest.TestCase):
+    """O primeiro uso real deu conselho errado por causa de um `except` mudo.
+
+    O Claude Desktop não tem permissão de TCC para `~/Desktop`, os quatro
+    repos de lá não apareceram, e ele concluiu "não está clonado" e sugeriu
+    mover o repositório. A lista estava incompleta e se apresentava completa.
+    """
+
+    def _call(self, default, parents):
+        context = build_context(default, parents)
+        context["initialized"] = True
+        response = dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+             "params": {"name": "list_repositories", "arguments": {}}},
+            context,
+        )
+        return response["result"]["structuredContent"]
+
+    @contextlib.contextmanager
+    def _area_with_an_unreadable_directory(self):
+        """Restaura a permissão ANTES do tempdir fechar, senão a limpeza falha."""
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).resolve()
+            blocked = parent / "sem-permissao"
+            _repository(blocked / "repo-invisivel")
+            os.chmod(blocked, 0o000)
+            try:
+                yield parent, blocked
+            finally:
+                os.chmod(blocked, 0o755)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
+                     "root ignora permissão de diretório")
+    def test_a_directory_it_cannot_read_is_named(self):
+        with self._area_with_an_unreadable_directory() as (parent, blocked):
+            result = self._call(parent, [parent])
+
+            self.assertIn(str(blocked), result["unreadable_directories"])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
+                     "root ignora permissão de diretório")
+    def test_an_unreadable_directory_becomes_a_declared_limitation(self):
+        """Sem isto nas limitações, o cliente lê ausência como inexistência."""
+        with self._area_with_an_unreadable_directory() as (parent, _):
+            limitations = " ".join(self._call(parent, [parent])["scope_limitations"])
+
+            self.assertIn("não foi possível ler", limitations)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
+                     "root ignora permissão de diretório")
+    def test_the_limitation_says_what_to_do_about_it(self):
+        """A causa real é TCC do macOS; sem dizer isso o humano move o repo."""
+        with self._area_with_an_unreadable_directory() as (parent, _):
+            limitations = " ".join(self._call(parent, [parent])["scope_limitations"])
+
+            self.assertIn("Privacidade", limitations)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
+                     "root ignora permissão de diretório")
+    def test_a_readable_sibling_is_still_found(self):
+        """Degradar não é abortar: o resto da varredura continua."""
+        with self._area_with_an_unreadable_directory() as (parent, _):
+            _repository(parent / "visivel")
+
+            names = [e["name"] for e in self._call(parent, [parent])["repositories"]]
+
+            self.assertIn("visivel", names)
+
+    def test_a_clean_scan_reports_an_empty_list_not_a_missing_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).resolve()
+            _repository(parent / "repo")
+
+            self.assertEqual(self._call(parent, [parent])["unreadable_directories"], [])
